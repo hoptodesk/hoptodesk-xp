@@ -1,0 +1,68 @@
+[package]
+name = "hoptodesk"
+version = "1.45.10"
+authors = ["hoptodesk <info@hoptodesk.com>"]
+edition = "2021"
+build = "build.rs"
+description = "A remote control software."
+default-run = "hoptodesk"
+
+[features]
+packui = []
+
+[dependencies]
+winapi = { version = "0.3", features = [
+    "winuser",
+    "wingdi",
+    "errhandlingapi",
+    "libloaderapi",
+    "memoryapi",
+    "tlhelp32",
+    "shellapi",
+    "processenv",
+    "synchapi",
+    "handleapi",
+    "minwinbase",
+    "winbase",
+    "winsock2",
+    "ws2def",
+    "wininet",
+    "securitybaseapi",
+    "wincon",
+    "fileapi",
+    "wincrypt",
+] }
+sciter-rs = { path = "rust-sciter" }
+protobuf = { version = "3.7", features = ["with-bytes"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+lazy_static = "1.4"
+bytes = "1.4"
+flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+
+[build-dependencies]
+protobuf-codegen = "3.4"
+cc = "1.0"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = "0.1"
+
+[package.metadata.winres]
+LegalCopyright = "Copyright © 2026 Begonia Holdings.  Copyright © 2026 Purslane Ltd."
+ProductName = "HopToDesk"
+FileDescription = "HopToDesk"
+CompanyName = "Begonia Holdings"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = 'abort'
+strip = true
+opt-level = 'z'
+
+# Release build with debug info for diagnostics (use --profile release-debug)
+[profile.release-debug]
+inherits = "release"
+strip = false
+debug = 1
+opt-level = 1

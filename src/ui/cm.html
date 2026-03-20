@@ -1,0 +1,434 @@
+<html>
+<head>
+<title>HopToDesk - Incoming Connection</title>
+<style>
+    body {
+        margin: 0;
+        overflow: hidden;
+        font-family: Tahoma, Helvetica, Verdana, Arial;
+        color: #333;
+        background: #F3F4F6;
+    }
+
+    div.content {
+        flow: horizontal;
+        size: *;
+    }
+
+    div.left-panel {
+        size: *;
+        padding: 1em;
+        border-spacing: 1em;
+        overflow: hidden;
+        position: relative;
+        background: #F3F4F6;
+    }
+
+    div.right-panel {
+        background: white;
+        border-left: #CED4DA 1px solid;
+        size: *;
+        display: none;
+    }
+
+    div.icon-and-id {
+        flow: horizontal;
+        border-spacing: 1em;
+    }
+
+    div.icon {
+        size: 96px;
+        min-width: 96px;
+        min-height: 96px;
+        text-align: center;
+        font-size: 48px;
+        line-height: 96px;
+        color: white;
+        font-weight: bold;
+        border-radius: 12px;
+    }
+
+    div.id-info {
+        margin: * 0;
+    }
+
+    div.peer-name {
+        font-weight: bold;
+        font-size: 1.1em;
+        color: #1E293B;
+    }
+
+    div.peer-id {
+        color: #6C757D;
+        font-size: 0.9em;
+        margin-top: 2px;
+    }
+
+    div.connected-time {
+        margin-top: 0.6em;
+        font-size: 0.9em;
+        color: #6C757D;
+    }
+
+    div.permissions {
+        flow: horizontal;
+        border-spacing: 0.5em;
+    }
+
+    div.permissions > div {
+        size: 48px;
+        background: #2C8CFF;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+
+    div.permissions > div:hover {
+        opacity: 0.85;
+    }
+
+    div.permissions > div:active {
+        opacity: 0.6;
+    }
+
+    div.permissions > div.disabled {
+        background: #CED4DA;
+    }
+
+    div.permissions icon {
+        margin: *;
+        size: 32px;
+        background-size: cover;
+        background-repeat: no-repeat;
+        display: block;
+    }
+
+    icon.keyboard {
+        background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAAgVBMVEUAAAD///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////9d3yJTAAAAKnRSTlMA0Gd/0y8ILZgbJffDPUwV2nvzt+TMqZxyU7CMb1pYQyzsvKunkXE4AwJnNC24AAAA+0lEQVQ4y83O2U7DMBCF4ZMxk9rZk26kpQs7nPd/QJy4EiLbLf01N5Y/2YP/qxDFQvGB5NPC/ZpVnfJx4b5xyGfF95rkHvNCWH1u+N6J6T0sC7gqRy8uGPfBLEbozPXUjlkQKwGaFPNizwQbwkx0TDvhCii34ExZCSQVBdzIOEOyeclSHgBGXkpeygXSQgStACtWx4Z8rr8COHOvfEP/IbbsQAToFUAAV1M408IIjIGYAPoCSNRP7DQutfQTqxuAiH7UUg1FaJR2AGrrx52sK2ye28LZ0wBAEyR6y8X+NADhm1B4fgiiHXbRrTrxpwEY9RdM9wsepnvFHfUDwYEeiwAJr/gAAAAASUVORK5CYII=');
+    }
+
+    icon.clipboard {
+        background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAAjVBMVEUAAAD///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8DizOFAAAALnRSTlMAnIsyZy8YZF3NSAuabRL34cq6trCScyZ4qI9CQDwV+fPl2tnTwzkeB+m/pIFK/Xx0ewAAAQlJREFUOMudktduhDAQRWep69iY3tle0+7/f16Qg7MsJUQ5Dwh8jzRzhemJPIaf3GiW7eFQfOwDPp1ek/iMnKgBi5PrhJAhZAa1lCxE9pw5KWMswOMAQXuQOvqTB7tLFJ36wimKLrufZTzUaoRtdthqRA2vEwS+tR4qguiElRKk1YMrYfUQRkwLmwVBYDMvJKF8R0o3V2MOhNrfo+hXSYYjPn1L/S+n438t8gWh+q1F+cYFBMm1Jh8Ia7y2OWXQxMMRLqr2eTc1crSD84cWfEGwYM4LlaACEee2ZjsQXJxR3qmYb+GpC8ZfNM5oh3yxxbxgQE7lEkb3ZvvH1BiRHn1bu02ICcKGWr4AudUkyYxmvywAAAAASUVORK5CYII=');
+    }
+
+    icon.audio {
+        background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAAk1BMVEUAAAD////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////ROyVeAAAAMHRSTlMAgfz08DDqCAThvraZjEcoGA751JxzbGdfTRP25NrIpaGTcEM+HAvMuKinhXhWNx9Yzm/gAAABFUlEQVQ4y82S2XLCMAxFheMsQNghCQFalkL39vz/11V4GpNk0r629+Va1pmxPFfyh1ravOP2Y1ydJmBO0lYP3r+PyQ62s2Y7fgF6VRXOYdToT++ogIuoVhCUtX7YpwJG3F8f6V8rr3WABwwUahlEvr8y3IBniGKdKYBQ5OGQpukQakBpIVcfwptIhJcf8hWGakdndAAhBInIGHbdQGJg6jjbDUgEE5EpmB+AAM4uj6gb+AQT6wdhITLvAHJ4VCtgoAlG1tpNA0gWON/f4ioHdSADc1bfgt+PZFkDlD6ojWF+kVoaHlhvFjPHuVRrefohY1GdcFm1N8JvwEyrJ/X2Th2rIoVgIi3Fo6Xf0z5k8psKu5f/oi+nHjjI92o36AAAAABJRU5ErkJggg==');
+    }
+
+    icon.file {
+        background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAAUVBMVEUAAAD///////////////////////////////////////////////////////////////////////////////////////////////////////8IN+deAAAAGnRSTlMAH+CAESEN8jyZkcIb5N/ONy3vmHhmiGjUm7UwS+YAAAHZSURBVGje7dnbboMwDIBhBwgQoFAO7Ta//4NOqCAXYZQstatq4r+r5ubrgQSpg8iyC4ZURa+PlIpQYGiwrzyeHtYZjAL8T05O4H8BbbKvFgRa4NoBU8pXeYEkDDgaaLQBcwJrmeErJQB/7wes3QBWGnCIX0+AQycL1PO6BMwPa0nA4ZxbgTvOjUYMGPHRnZkQAY4mxPZBjmy53E7ukSkFKYB/D4XsWZQx64sCeYebOogGsoOBYvv6/UCb8F0IOBZ0TlP6lEYdANY350AJqB9/qPVuOI5evw4A1hgLigAlepnyxW80bcCcwN++A2s82Vcu02ta+ceq9BoL5KGTTRwQPlpqA3gCnwWU2kCDgeWRQPj2jAPCDxgCMjhI6uZnToDpvd/BJeFrJQB/fsAa02gCt3mi1wNuy8GgBNDZlysBNNSrADVSjcJl6vCpUn6jOdx0kz0q6PMhQRa4465SFKhx35cgUCBTwj2/NHwZAb71qR8GEP2H1XcmAtBPTEO67GP6FUUAIKGABbDLQ0EArhN2sAIGesRO+iyy+RMAjckVTlMCKFVAbh/4Af9OPgG61SkDVco3BQGT3GXaDAnTIAcYZDuBTwGsAGDxuBFeAQqIqwoFMlAVLrHr/wId5MPt0nilGgAAAABJRU5ErkJggg==');
+    }
+
+    icon.restart {
+        background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAB7BAAAewQHDaVRTAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAAAbhJREFUWIXVlrFqFGEUhb+7UYxaWCQKlrKKxaZSQVGDJih2tj6MD2DnMwiWvoAIRnENIpZiYxEro6IooiS7SPwsMgNLkk3mjmYmnmb45/73nMNwz/x/qH3gMu2gH6rAU+Blw+Lngau4jpmGxVF7qp1iPWjaQKnZ2WnXbuP/NqAeUPc3ZkA9XDwvqc+BVWCgPlJ7tRwUKThZce819b46VH+pfXVRXVO/q2cSul3VOgZUl0ejq86r39TXI8mqZKDuDEwCw3IREQvAbWAGmMsQZQ0sAl3gHPB1Q+0e8BuYzRDuy2yOiFVgaUxtRf0ETGc4syk4rc6PqU0Cx9j8Zf6dAeAK8Fi9sUXtFjABvEgxJlNwRP2svlNPjbw/q35U36oTFbnyMSwabxb/gB/qA3VBHagrauV7RW0DRfP1IvMlXqkXkhz1DYyQTKtHa/Z2VVMx3IiI+PI3/bCHjuOpFrSnAMpL6QfgTcMGesDx0kBr2BMzsNyi/vtQu8CJlgwsRbZDnWP90NkKaxHxJMOXMqAeAn5u0ydwMCKGY+qbkB3C2W3EKWoXk5zVoHbUZ+6Mh7tl4G4F8RJ3qvL+AfV3r5Vdpj70AAAAAElFTkSuQmCC');
+    }
+
+    div.buttons {
+        width: *;
+        border-spacing: 0.5em;
+        text-align: center;
+    }
+
+    div.buttons button {
+        width: 140px;
+        height: 48px;
+        margin: 0.4em;
+        font-weight: 600;
+        font-size: 1.1em;
+        border-radius: 8px;
+        cursor: pointer;
+    }
+
+    button#btn-accept {
+        background: #0D6EFD;
+        color: white;
+        border: none;
+        font-size: 1.2em;
+    }
+    button#btn-accept:hover { background: #0B5ED7; }
+
+    button#btn-reject {
+        background: #0D6EFD;
+        color: white;
+        border: none;
+        font-size: 1.2em;
+    }
+    button#btn-reject:hover { background: #0B5ED7; }
+
+    button#btn-disconnect {
+        width: 160px;
+        background: #EF4444;
+        color: white;
+        font-size: 1.2em;
+        border: none;
+        border-radius: 8px;
+        height: 40px;
+        cursor: pointer;
+    }
+    button#btn-disconnect:hover { background: #DC2626; }
+    button#btn-disconnect:active { opacity: 0.7; }
+
+    #button-row {
+        flow: horizontal;
+        width: *;
+        border-spacing: 12px;
+        text-align: center;
+        margin: 8px auto;
+    }
+
+    #disconnect-row {
+        visibility: hidden;
+        height: 0;
+        overflow: hidden;
+        text-align: center;
+    }
+
+    #cm-status {
+        text-align: center;
+        font-size: 12px;
+        color: #666;
+    }
+
+    div.chaticon {
+        position: absolute;
+        right: 10px;
+        top: 10px;
+        size: 32px;
+        background-color: #F3F4F6;
+        cursor: pointer;
+        text-align: center;
+        line-height: 32px;
+    }
+    div.chaticon:hover { background: #E5E7EB; }
+
+    div.chat-panel {
+        padding: 12px;
+        size: *;
+        flow: vertical;
+    }
+
+    div.chat-panel .chat-title {
+        font-weight: bold;
+        font-size: 13px;
+        color: #1E293B;
+        margin-bottom: 8px;
+    }
+
+    #chat-msgs {
+        background: #F9FAFB;
+        border: 1px solid #E5E7EB;
+        border-radius: 6px;
+        padding: 8px;
+        size: *;
+        overflow-y: auto;
+        font-size: 12px;
+        line-height: 1.6em;
+    }
+    .chat-msg b { color: #007BFF; }
+
+    #chat-input-row {
+        flow: horizontal;
+        border-spacing: 6px;
+        margin-top: 8px;
+    }
+
+    #chat-input {
+        width: *;
+        height: 30px;
+        border: 1px solid #CED4DA;
+        border-radius: 6px;
+        padding: 0 8px;
+        font-size: 12px;
+    }
+
+    input:focus {
+        border-color: #0D6EFD;
+    }
+
+    #btn-chat-send {
+        background: #0D6EFD;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 0 14px;
+        height: 30px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    #btn-chat-send:hover { background: #0B5ED7; }
+
+    div.spacer {
+        height: *;
+    }
+
+    .perm-label {
+        font-size: 11px;
+        color: #6C757D;
+        margin-top: -6px;
+    }
+</style>
+<script type="text/tiscript">
+view.windowMinSize = (300, 450);
+</script>
+</head>
+<body>
+    <div class="content">
+        <div class="left-panel">
+            <div class="chaticon" id="chat-toggle">&#128172;</div>
+
+            <div class="icon-and-id">
+                <div class="icon" id="avatar" style="background: __AVATAR_COLOR__">__AVATAR_LETTER__</div>
+                <div class="id-info">
+                    <div class="peer-name" id="peer-name">__PEER_NAME__</div>
+                    <div class="peer-id">(__PEER_ID__)</div>
+                    <div class="connected-time">Connected <span id="time">00:00:00</span></div>
+                </div>
+            </div>
+
+            <div style="height:8px"></div>
+
+            <div class="perm-label">Permissions</div>
+            <div class="permissions">
+                <div id="perm-keyboard" title="Keyboard &amp; Mouse"><icon class="keyboard" /></div>
+                <div id="perm-clipboard" title="Clipboard"><icon class="clipboard" /></div>
+                <div id="perm-audio" title="Audio"><icon class="audio" /></div>
+                <div id="perm-file" title="File Transfer"><icon class="file" /></div>
+                <div id="perm-restart" title="Restart"><icon class="restart" /></div>
+            </div>
+
+            <div class="spacer"></div>
+
+            <div id="cm-status">Waiting for your response...</div>
+
+            <div id="button-row">
+                <button id="btn-accept">Accept</button>
+                <button id="btn-reject">Dismiss</button>
+            </div>
+
+            <div id="disconnect-row">
+                <button id="btn-disconnect">Disconnect</button>
+            </div>
+        </div>
+
+        <div class="right-panel" id="right-panel">
+            <div class="chat-panel">
+                <div class="chat-title">Chat</div>
+                <div id="chat-msgs"></div>
+                <div id="chat-input-row">
+                    <input type="text" id="chat-input" placeholder="Type a message..." />
+                    <button id="btn-chat-send">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="accept-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="reject-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="disconnect-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="chat-send-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="perm-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+
+    <script type="text/tiscript">
+        var show_chat = false;
+        var connect_time = new Date();
+
+        function self.ready() {
+            var (sw, sh) = view.screenBox(#workarea, #dimension);
+            var w = 300;
+            var h = 450;
+            view.move(sw - w, 0, w, h);
+        }
+
+        function updateTime() {
+            self.timer(1000, function() {
+                var now = new Date();
+                var seconds = Date.diff(connect_time, now, #seconds);
+                var hours = (seconds / 3600).toInteger();
+                var minutes = ((seconds % 3600) / 60).toInteger();
+                var secs = (seconds % 60).toInteger();
+                var out = "";
+                if (hours < 10) out += "0";
+                out += hours + ":";
+                if (minutes < 10) out += "0";
+                out += minutes + ":";
+                if (secs < 10) out += "0";
+                out += secs;
+                var el = $(#time);
+                if (el) el.text = out;
+                updateTime();
+            });
+        }
+        updateTime();
+
+        event click $(#chat-toggle) {
+            show_chat = !show_chat;
+            var rp = $(#right-panel);
+            rp.style#display = show_chat ? "block" : "none";
+
+            var (x, y, w, h) = view.box(#rectw, #border, #screen);
+            if (show_chat && w < 600) {
+                view.move(x - (600 - w), y, 600, h);
+            } else if (!show_chat && w > 450) {
+                view.move(x + (w - 300), y, 300, h);
+            }
+        }
+
+        $(#btn-accept).onClick = function() {
+            $(#accept-flag).text = "accept";
+        };
+
+        $(#btn-reject).onClick = function() {
+            $(#reject-flag).text = "reject";
+            view.close();
+        };
+
+        $(#btn-disconnect).onClick = function() {
+            $(#disconnect-flag).text = "disconnect";
+            view.close();
+        };
+
+        function sendChat() {
+            var input = $(#chat-input);
+            var text = input.text.trim();
+            if (text.length > 0) {
+                $(#chat-send-flag).text = text;
+                input.text = "";
+            }
+        }
+
+        $(#btn-chat-send).onClick = function() {
+            sendChat();
+        };
+
+        $(#chat-input).onKey = function(evt) {
+            if (evt.type == Event.KEY_DOWN && evt.keyCode == 13) {
+                sendChat();
+                return true;
+            }
+            return false;
+        };
+
+        function togglePerm(el, name) {
+            var isDisabled = el.attributes.hasClass("disabled");
+            if (isDisabled) {
+                el.attributes.removeClass("disabled");
+            } else {
+                el.attributes.addClass("disabled");
+            }
+            var enabled = isDisabled ? "1" : "0";
+            $(#perm-flag).text = name + "|" + enabled;
+        }
+
+        event click $(#perm-keyboard) { togglePerm(this, "keyboard"); }
+        event click $(#perm-clipboard) { togglePerm(this, "clipboard"); }
+        event click $(#perm-audio) { togglePerm(this, "audio"); }
+        event click $(#perm-file) { togglePerm(this, "file"); }
+        event click $(#perm-restart) { togglePerm(this, "restart"); }
+
+        function self.closing() {
+            view.windowState = View.WINDOW_HIDDEN;
+            return false;
+        }
+    </script>
+</body>
+</html>

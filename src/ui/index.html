@@ -1,0 +1,1366 @@
+<html>
+<head>
+    <meta charset="utf-8" />
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Tahoma, Helvetica, Verdana, Arial;
+            color: #1E293B;
+        }
+
+        .app {
+            flow: vertical;
+            size: *;
+            background: #F0F4F8;
+        }
+
+        .top-bar {
+            flow: horizontal;
+            width: *;
+            padding: 8px 16px;
+            vertical-align: middle;
+            border-spacing: 10px;
+            background: white;
+            border-bottom: 1px solid #E2E8F0;
+        }
+
+        .brand-name {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #1E3A5F;
+            letter-spacing: 0.5px;
+        }
+
+        .main-content {
+            width: *;
+            height: *;
+            flow: vertical;
+            overflow: scroll-indicator;
+            padding: 12px 16px;
+            border-spacing: 10px;
+        }
+
+        .cards-row {
+            flow: horizontal-wrap;
+            width: *;
+            border-spacing: 10px;
+        }
+
+        .card-device, .card-remote {
+            min-width: 140px;
+            width: *;
+            height: *;
+            background: white;
+            border-radius: 12px;
+            padding: 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            flow: vertical;
+        }
+
+        .card-header {
+            flow: horizontal;
+            vertical-align: middle;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #64748B;
+            padding: 12px 16px 8px 16px;
+            border-bottom: 1px solid #F1F5F9;
+        }
+
+        .settings-gear {
+            margin-left: auto;
+            cursor: pointer;
+            width: 18px;
+            height: 18px;
+            background: no-repeat center center;
+            background-size: contain;
+            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA+ElEQVR42u1XwQ3DIAzMBoyQURiBEfh0hP4ZoEMwCiN0BI/QEShIRooowaEY0VSxdA9kOz4szpBluexsdrs/1gAVYDaI63V0YR3wDPAVRL/mLiwDgCicI8ZLrl37DuiZxb8ngW33jJCtBICZAMxofYJr6sABqUW8AizOAIvrfiXgkPEHtC6yPFEgDuhTSBLIYYXB1M7FTq7Y6cQWiiJgiA9YIt8S+aaXgBmZ/xMdmH4GVjytNgUXhtI4FTTchGPmQFbYTZmE0+8C4jaECrmaT3K9ByT6PopUiLM9Shwh1aQax1K8oARJDBtbih/xOgaWg3a6/4LL/tbeQoy7BGBwGKMAAAAASUVORK5CYII=');
+            opacity: 0.6;
+        }
+
+        .settings-gear:hover {
+            opacity: 1.0;
+        }
+
+        .card-body {
+            padding: 12px 16px 16px 16px;
+            flow: vertical;
+            border-spacing: 8px;
+        }
+
+        .id-label, .pw-label {
+            font-size: 0.75em;
+            font-weight: 600;
+            color: #64748B;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .idbox {
+            font-size: 1.6em;
+            font-weight: 700;
+            color: #1E293B;
+            letter-spacing: 1px;
+        }
+
+        .passwordbox {
+            font-family: Consolas, 'Courier New', Tahoma;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #475569;
+        }
+
+        .connect-buttons {
+            flow: horizontal;
+            border-spacing: 8px;
+            padding-top: 4px;
+        }
+
+        button.button {
+            height: 2.2em;
+            border-radius: 10px;
+            background: #2C8CFF;
+            color: white;
+            border-color: #2C8CFF;
+            min-width: 40px;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 5px;
+            padding-bottom: 5px;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        button.button:hover {
+            border-color: #94A3B8;
+        }
+
+        button.button:active {
+            background: #0052CC;
+            border-color: #0052CC;
+        }
+
+        button.outline {
+            background: white;
+            color: #2C8CFF;
+            border: 1px solid #2C8CFF;
+        }
+
+        button.outline:hover {
+            background: #EBF5FF;
+        }
+
+        button.outline:active {
+            background: #D6EBFF;
+        }
+
+        input[type=text], input[type=password] {
+            width: *;
+            border: 1px solid #E2E8F0;
+            border-radius: 6px;
+            color: #1E293B;
+            padding: 6px 8px;
+            background: white;
+            font-size: 1.2em;
+        }
+
+        input:focus {
+            outline: #2C8CFF solid 2px;
+        }
+
+        .connect-status {
+            flow: horizontal;
+            vertical-align: middle;
+            font-size: 0.7em;
+            color: #64748B;
+            padding: 4px 12px;
+        }
+
+        .connect-status-icon {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            margin-right: 6px;
+        }
+        .connect-status-icon.status-connecting { background-color: #FFC107; }
+        .connect-status-icon.status-online { background-color: #22C55E; }
+        .connect-status-icon.status-offline { background-color: #DC2626; }
+
+        .sessions-card {
+            width: *;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            flow: vertical;
+            height: *;
+            min-height: 80px;
+        }
+
+        .sessions-bar {
+            flow: horizontal;
+            vertical-align: middle;
+            padding: 8px 16px;
+            border-bottom: 1px solid #F1F5F9;
+        }
+
+        .sessions-tab {
+            flow: horizontal;
+            border-spacing: 4px;
+        }
+
+        .sessions-tab span {
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .sessions-tab span.active {
+            color: #1E3A5F;
+            background: #E8F0FE;
+        }
+
+        .sessions-tab span.inactive {
+            color: #94A3B8;
+        }
+
+        .sessions-tab span.inactive:hover {
+            color: #64748B;
+            background: #F1F5F9;
+        }
+
+        .sessions-list {
+            flow: vertical;
+            padding: 4px 8px;
+            overflow-y: scroll-indicator;
+            height: *;
+        }
+
+        .session-item {
+            flow: horizontal;
+            vertical-align: middle;
+            padding: 4px 0;
+            border-radius: 10px;
+            cursor: pointer;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            margin-bottom: 4px;
+            height: 52px;
+        }
+
+        .session-item:hover {
+            outline: 1px solid #CBD5E1;
+        }
+
+        .session-platform {
+            width: 42px;
+            min-width: 42px;
+            height: 42px;
+            background: #2C8CFF;
+            border-radius: 8px;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 0.65em;
+            font-weight: 700;
+            color: white;
+            margin: 4px 0 4px 6px;
+        }
+
+        .session-info {
+            flow: vertical;
+            size: *;
+            padding-left: 10px;
+            padding-top: 6px;
+            padding-bottom: 6px;
+            overflow: hidden;
+            vertical-align: middle;
+        }
+
+        .session-name {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #1E293B;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .session-sub {
+            font-size: 0.7em;
+            color: #393E46;
+            font-weight: 600;
+            overflow: hidden;
+            white-space: nowrap;
+            margin-top: 2px;
+        }
+
+        .session-fav {
+            font-size: 0.85em;
+            color: #CBD5E1;
+            cursor: pointer;
+            padding: 4px;
+            vertical-align: middle;
+        }
+
+        .session-fav.is-fav {
+            color: #F59E0B;
+        }
+
+        .session-menu {
+            font-size: 1em;
+            color: #94A3B8;
+            cursor: pointer;
+            padding: 4px 8px;
+            vertical-align: middle;
+            border-radius: 6px;
+        }
+
+        .session-menu:hover {
+            color: #475569;
+            background: #F1F5F9;
+        }
+
+        #ctx-menu-overlay {
+            display: none;
+            position: fixed;
+            left: 0; top: 0; right: 0; bottom: 0;
+            z-index: 10000;
+            background-color: transparent;
+        }
+
+        #ctx-menu {
+            position: fixed;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #D1D5DB;
+            padding: 4px 0;
+            min-width: 160px;
+            flow: vertical;
+            z-index: 10001;
+        }
+
+        .ctx-item {
+            padding: 6px 14px;
+            font-size: 0.8em;
+            color: #1E293B;
+            cursor: pointer;
+        }
+
+        .ctx-item:hover {
+            background: #F1F5F9;
+        }
+
+        .ctx-separator {
+            height: 1px;
+            background: #E2E8F0;
+            margin: 3px 0;
+        }
+
+        .ctx-item.danger {
+            color: #EF4444;
+        }
+
+        .ctx-item.danger:hover {
+            background: #FEF2F2;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 20px;
+            font-size: 0.85em;
+            color: #94A3B8;
+            margin: * 0;
+        }
+
+        .pw-row {
+            flow: horizontal;
+            vertical-align: middle;
+            border-spacing: 6px;
+        }
+
+        .ua-section {
+            padding: 4px 16px 12px 16px;
+            border-top: 1px solid #F1F5F9;
+        }
+
+        .ua-toggle-row {
+            flow: horizontal;
+            vertical-align: middle;
+            border-spacing: 6px;
+        }
+
+        .ua-label {
+            font-size: 0.75em;
+            font-weight: 600;
+            color: #64748B;
+            width: *;
+        }
+
+        button.ua-set-btn {
+            font-size: 0.7em;
+            padding: 2px 10px;
+            height: 1.8em;
+            border-radius: 4px;
+            background: #F1F5F9;
+            color: #475569;
+            border: 1px solid #CBD5E1;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        button.ua-set-btn:hover {
+            background: #E2E8F0;
+            border-color: #94A3B8;
+        }
+
+        button.ua-set-btn:active {
+            background: #CBD5E1;
+        }
+
+        #settings-overlay {
+            display: none;
+            position: fixed;
+            left: 0; top: 0; right: 0; bottom: 0;
+        }
+
+        #settings-backdrop {
+            position: fixed;
+            left: 0; top: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.3);
+        }
+
+        #settings-panel {
+            position: fixed;
+            left: 0; top: 0;
+            width: 260px;
+            height: *;
+            background: white;
+            flow: vertical;
+            overflow-y: auto;
+        }
+
+        .settings-header {
+            flow: horizontal;
+            vertical-align: middle;
+            padding: 14px 16px;
+            border-bottom: 1px solid #E2E8F0;
+        }
+
+        .settings-title {
+            font-weight: 700;
+            font-size: 1.05em;
+            color: #1E293B;
+        }
+
+        .settings-close {
+            margin-left: auto;
+            cursor: pointer;
+            font-size: 1.2em;
+            color: #94A3B8;
+            padding: 0 4px;
+        }
+
+        .settings-close:hover { color: #1E293B; }
+
+        .settings-body {
+            flow: vertical;
+            padding: 8px 0;
+        }
+
+        .settings-section {
+            flow: vertical;
+            padding: 4px 0;
+            border-bottom: 1px solid #F1F5F9;
+        }
+
+        .section-label {
+            font-size: 0.65em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #94A3B8;
+            padding: 8px 16px 4px 16px;
+        }
+
+        .setting-row {
+            flow: horizontal;
+            vertical-align: middle;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+
+        .setting-row:hover {
+            background: #F8FAFC;
+        }
+
+        .setting-name {
+            font-size: 0.85em;
+            color: #334155;
+            width: *;
+        }
+
+        .setting-value {
+            font-size: 0.75em;
+            color: #94A3B8;
+        }
+
+        .setting-arrow {
+            font-size: 1.2em;
+            color: #CBD5E1;
+        }
+
+        .toggle-switch {
+            width: 36px;
+            height: 20px;
+            border-radius: 10px;
+            background: #CBD5E1;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .toggle-switch.on {
+            background: #2C8CFF;
+        }
+
+        .toggle-knob {
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            background: white;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+        }
+
+        .toggle-switch.on .toggle-knob {
+            left: 18px;
+        }
+
+        #pw-settings-overlay {
+            display: none;
+            position: fixed;
+            left: 0; top: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        #pw-settings-dialog {
+            width: 300px;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin: * auto;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+            flow: vertical;
+            border-spacing: 10px;
+            text-align: left;
+        }
+
+        .pw-dialog-title {
+            font-size: 1em;
+            font-weight: 700;
+            color: #1E293B;
+        }
+
+        .pw-dialog-section {
+            flow: vertical;
+            border-spacing: 6px;
+        }
+
+        .pw-dialog-section-title {
+            font-size: 0.75em;
+            font-weight: 600;
+            color: #64748B;
+            text-transform: uppercase;
+        }
+
+        .pw-dialog-section input {
+            width: *;
+            border: 1px solid #E2E8F0;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 0.9em;
+        }
+
+        .pw-dialog-section input:focus {
+            outline: #2C8CFF solid 2px;
+        }
+
+        .pw-dialog-error {
+            font-size: 0.75em;
+            color: #EF4444;
+            min-height: 16px;
+        }
+
+        .pw-dialog-buttons {
+            flow: horizontal;
+            border-spacing: 8px;
+        }
+
+        .pw-dialog-buttons button {
+            width: *;
+            height: 2em;
+            border-radius: 6px;
+            font-size: 0.85em;
+            cursor: pointer;
+        }
+
+        #about-overlay {
+            display: none;
+            position: fixed;
+            left: 0; top: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        #about-dialog {
+            width: 300px;
+            background: white;
+            border-radius: 12px;
+            padding: 24px 20px;
+            margin: * auto;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+            flow: vertical;
+            border-spacing: 6px;
+            text-align: center;
+        }
+
+        .about-app-name {
+            font-size: 1.3em;
+            font-weight: 700;
+            color: #1E293B;
+        }
+
+        .about-version {
+            font-size: 0.85em;
+            color: #64748B;
+        }
+
+        .about-link {
+            font-size: 0.8em;
+            color: #2C8CFF;
+            text-decoration: none;
+            cursor: pointer;
+            display: block;
+            text-align: center;
+            padding: 2px 0;
+        }
+
+        .about-link:hover {
+            text-decoration: underline;
+        }
+
+        .about-copyright {
+            font-size: 0.65em;
+            color: #94A3B8;
+            padding-top: 4px;
+        }
+
+        .about-close-btn {
+            width: 80px;
+            height: 2em;
+            border-radius: 6px;
+            font-size: 0.85em;
+            cursor: pointer;
+            margin: 4px auto 0 auto;
+        }
+
+        #lang-overlay {
+            display: none;
+            position: fixed;
+            left: 0; top: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        #lang-dialog {
+            width: 280px;
+            max-height: 400px;
+            background: white;
+            border-radius: 12px;
+            padding: 16px 0;
+            margin: * auto;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+            flow: vertical;
+            text-align: left;
+        }
+
+        .lang-dialog-title {
+            font-size: 1em;
+            font-weight: 700;
+            color: #1E293B;
+            padding: 0 16px 10px 16px;
+            border-bottom: 1px solid #F1F5F9;
+        }
+
+        .lang-list {
+            flow: vertical;
+            overflow-y: auto;
+            max-height: 320px;
+            padding: 4px 0;
+        }
+
+        .lang-item {
+            padding: 8px 16px;
+            font-size: 0.85em;
+            color: #334155;
+            cursor: pointer;
+        }
+
+        .lang-item:hover {
+            background: #F1F5F9;
+        }
+
+        .lang-item.selected {
+            font-weight: 700;
+            color: #2C8CFF;
+        }
+    </style>
+    <script type="text/tiscript">
+
+view.windowMinSize = (340, 280);
+
+function formatId(id) {
+    if (id.length == 9) {
+        return id.substr(0, 3) + " " + id.substr(3, 3) + " " + id.substr(6, 3);
+    }
+    return id;
+}
+
+// Translation system
+var _tr = {};
+
+function initTranslations() {
+    var trEl = $(#tr-data);
+    if (trEl) {
+        var raw = trEl.text;
+        if (raw && raw.length > 2) {
+            try { _tr = JSON.parse(raw); } catch(e) {}
+        }
+    }
+}
+
+function tr(key) {
+    if (_tr[key] !== undefined && _tr[key] !== "") return _tr[key];
+    return key;
+}
+
+function initLangList() {
+    var dataEl = $(#langs-data);
+    if (!dataEl) return;
+    var raw = dataEl.text;
+    if (!raw || raw.length < 3) return;
+    var langs;
+    try { langs = JSON.parse(raw); } catch(e) { return; }
+
+    var listEl = $(#lang-list);
+    if (!listEl) return;
+
+    var currentCode = $(#current-lang-code).text || "";
+
+    var html = "";
+    for (var item in langs) {
+        var code = item[0];
+        var name = item[1];
+        var cls = (code == currentCode) ? "lang-item selected" : "lang-item";
+        html = html + "<div class=\"" + cls + "\" data-code=\"" + code + "\">" + name + "</div>";
+    }
+    listEl.html = html;
+}
+
+function applyTranslations() {
+    for (var el in $$([data-tr])) {
+        var key = el.attributes["data-tr"];
+        if (key) el.text = tr(key);
+    }
+    for (var inp in $$([data-tr-placeholder])) {
+        var key = inp.attributes["data-tr-placeholder"];
+        if (key) inp.attributes["placeholder"] = tr(key);
+    }
+    // Update current language display in settings
+    var langCode = $(#current-lang-code).text || "";
+    var dataEl = $(#langs-data);
+    if (dataEl) {
+        try {
+            var langs = JSON.parse(dataEl.text);
+            for (var item in langs) {
+                if (item[0] == langCode) {
+                    $(#current-lang-display).text = item[1];
+                    break;
+                }
+            }
+        } catch(e) {}
+    }
+}
+
+self.ready = function() {
+    initTranslations();
+    initLangList();
+    applyTranslations();
+};
+
+    </script>
+</head>
+<body>
+    <div class="app">
+        <div class="top-bar">
+            <div class="brand-name">HopToDesk</div>
+            <div style="width: *;" />
+            <div class="connect-status">
+                <span class="connect-status-icon status-connecting" id="status-icon"></span>
+                <span id="status-text" data-tr="Connecting...">Connecting...</span>
+            </div>
+        </div>
+        <div class="main-content">
+            <div class="cards-row">
+                <div class="card-device">
+                    <div class="card-header"><span data-tr="This Device">This Device</span><div style="width:*;"></div><div class="settings-gear" id="settings-gear" title="Settings"></div></div>
+                    <div class="card-body">
+                        <div>
+                            <div class="id-label" data-tr="Your ID">Your ID</div>
+                            <div id="idbox" class="idbox">Loading...</div>
+                        </div>
+                        <div>
+                            <div class="pw-label" data-tr="Password">Password</div>
+                            <div class="pw-row">
+                                <div id="pwbox" class="passwordbox">------</div>
+                                <button class="ua-set-btn" id="ua-set-btn" data-tr="Set">Set</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ua-section">
+                        <div class="ua-toggle-row">
+                            <span class="ua-label" data-tr="Unattended Access">Unattended Access</span>
+                            <span id="ua-status" style="font-size:0.7em; color:#22C55E;"></span>
+                            <div class="toggle-switch" id="sw-ua"><div class="toggle-knob"></div></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-remote">
+                    <div class="card-header" data-tr="Remote Control">Remote Control</div>
+                    <div class="card-body">
+                        <div class="id-label" data-tr="Partner ID">Partner ID</div>
+                        <input type="text" id="remote-id" data-tr-placeholder="Enter Remote ID" placeholder="Enter partner ID" />
+                        <div class="connect-buttons">
+                            <button class="button" id="connect" data-tr="Connect">Connect</button>
+                            <button class="button outline" id="file-transfer" data-tr="Transfer File">Transfer File</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sessions-card">
+                <div class="sessions-bar">
+                    <div class="sessions-tab">
+                        <span id="tab-recent" class="active" data-tr="Recent Sessions">Recent</span>
+                        <span id="tab-fav" class="inactive" data-tr="Favorites">Favorites</span>
+                    </div>
+                </div>
+                <div id="sessions-list" class="sessions-list">
+                    <div class="empty-state">No recent sessions</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-overlay">
+        <div id="settings-backdrop"></div>
+        <div id="settings-panel">
+            <div class="settings-header">
+                <span class="settings-title" data-tr="Settings">Settings</span>
+                <div style="width:*;"></div>
+                <span class="settings-close" id="settings-close">X</span>
+            </div>
+            <div class="settings-body">
+                <div class="settings-section">
+                    <div class="section-label" data-tr="Remote Access">Remote Access</div>
+                    <div class="setting-row" id="toggle-keyboard">
+                        <span class="setting-name" data-tr="Keyboard/Mouse">Keyboard/Mouse</span>
+                        <div class="toggle-switch on" id="sw-keyboard"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="setting-row" id="toggle-clipboard">
+                        <span class="setting-name" data-tr="Clipboard">Clipboard</span>
+                        <div class="toggle-switch on" id="sw-clipboard"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="setting-row" id="toggle-file">
+                        <span class="setting-name" data-tr="File Transfer">File Transfer</span>
+                        <div class="toggle-switch on" id="sw-file"><div class="toggle-knob"></div></div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="section-label" data-tr="Security">Security</div>
+                    <div class="setting-row" id="action-password">
+                        <span class="setting-name" data-tr="Permanent Password">Permanent Password</span>
+                        <span class="setting-arrow">></span>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="section-label" data-tr="Language">Language</div>
+                    <div class="setting-row" id="action-language">
+                        <span class="setting-name" id="current-lang-display">English</span>
+                        <span class="setting-arrow">></span>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="setting-row" id="action-about">
+                        <span class="setting-name" data-tr="About HopToDesk">About HopToDesk</span>
+                        <span class="setting-arrow">></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="pw-settings-overlay">
+        <div id="pw-settings-dialog">
+            <div class="pw-dialog-title" data-tr="Password Settings">Password Settings</div>
+            <div class="pw-dialog-section">
+                <div class="pw-dialog-section-title" data-tr="Permanent Password">Permanent Password</div>
+                <input type="password" id="perm-pw1" placeholder="Password (min 6 chars)" />
+                <input type="password" id="perm-pw2" placeholder="Confirm password" />
+                <div class="pw-dialog-error" id="perm-pw-error"></div>
+            </div>
+            <div class="pw-dialog-buttons">
+                <button class="button outline" id="pw-settings-cancel" data-tr="Cancel">Cancel</button>
+                <button class="button" id="pw-settings-save" data-tr="Save">Save</button>
+            </div>
+            <div style="font-size:0.7em; color:#94A3B8; padding-top:4px;">Leave empty to clear permanent password.</div>
+        </div>
+    </div>
+
+    <div id="about-overlay">
+        <div id="about-dialog">
+            <div class="about-app-name">HopToDesk</div>
+            <div class="about-version" id="about-version">Version</div>
+            <div style="height:8px;"></div>
+            <div class="about-link" id="link-website" data-tr="Website">Website</div>
+            <div class="about-link" id="link-privacy" data-tr="Privacy Statement">Privacy Statement</div>
+            <div style="height:4px;"></div>
+            <div class="about-link" id="link-agpl">This software is licensed under AGPL 3.0</div>
+            <div class="about-link" id="link-source">Source code is available here</div>
+            <div style="height:8px;"></div>
+            <div class="about-copyright">This Application uses Sciter Engine, copyright Terra Informatica Software, Inc.</div>
+            <div class="about-copyright">Copyright HopToDesk. Originally forked from RustDesk.</div>
+            <div style="height:8px;"></div>
+            <button class="button" id="about-close" data-tr="OK">OK</button>
+        </div>
+    </div>
+
+    <div id="lang-overlay">
+        <div id="lang-dialog">
+            <div class="lang-dialog-title" data-tr="Language">Language</div>
+            <div class="lang-list" id="lang-list"></div>
+        </div>
+    </div>
+
+    <div id="ctx-menu-overlay">
+        <div id="ctx-menu">
+            <div class="ctx-item" id="ctx-connect" data-tr="Connect">Connect</div>
+            <div class="ctx-item" id="ctx-transfer" data-tr="Transfer File">Transfer File</div>
+            <div class="ctx-item" id="ctx-wol">WOL</div>
+            <div class="ctx-item" id="ctx-set-mac">Set MAC (WOL)</div>
+            <div class="ctx-separator"></div>
+            <div class="ctx-item" id="ctx-rename" data-tr="Rename">Rename</div>
+            <div class="ctx-item" id="ctx-add-fav" data-tr="Add to Favorites">Add to Favorites</div>
+            <div class="ctx-item" id="ctx-remove-fav" data-tr="Remove from Favorites">Remove from Favorites</div>
+            <div class="ctx-item" id="ctx-forget-pw" data-tr="Forget Password">Forget Password</div>
+            <div class="ctx-separator"></div>
+            <div class="ctx-item danger" id="ctx-remove" data-tr="Remove">Remove</div>
+        </div>
+    </div>
+
+    <div id="rename-overlay" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle;">
+        <div style="width:260px; background:white; border-radius:10px; padding:16px; margin:* auto; flow:vertical; border-spacing:8px;">
+            <div style="font-size:0.9em; font-weight:700; color:#1E293B;" data-tr="Rename Peer">Rename Peer</div>
+            <input type="text" id="rename-input" style="width:*; border:1px solid #E2E8F0; border-radius:6px; padding:6px 8px; font-size:0.85em;" data-tr-placeholder="Enter alias" placeholder="Enter alias" />
+            <div style="flow:horizontal; border-spacing:8px;">
+                <button class="button outline" id="rename-cancel" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Cancel">Cancel</button>
+                <button class="button" id="rename-save" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="mac-overlay" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle;">
+        <div style="width:280px; background:white; border-radius:10px; padding:16px; margin:* auto; flow:vertical; border-spacing:8px;">
+            <div style="font-size:0.9em; font-weight:700; color:#1E293B;">Set MAC Address for WOL</div>
+            <input type="text" id="mac-input" style="width:*; border:1px solid #E2E8F0; border-radius:6px; padding:6px 8px; font-size:0.85em;" placeholder="AA:BB:CC:DD:EE:FF" />
+            <div id="mac-error" style="font-size:0.8em; color:#DC2626; min-height:1.2em;"></div>
+            <div style="flow:horizontal; border-spacing:8px;">
+                <button class="button outline" id="mac-cancel" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Cancel">Cancel</button>
+                <button class="button" id="mac-save" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="connect-target" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="ft-target" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="tab-switch-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="fav-toggle-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="remove-peer-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="forget-pw-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="set-perm-pw-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="set-option-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="open-url-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="set-lang-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="langs-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="tr-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="current-lang-code" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="rename-peer-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="ctx-menu-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="wol-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="set-mac-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+
+    <script type="text/tiscript">
+
+        function openPwSettings() {
+            $(#perm-pw1).value = "";
+            $(#perm-pw2).value = "";
+            $(#perm-pw-error).text = "";
+            $(#pw-settings-overlay).style#display = "block";
+            $(#perm-pw1).state.focus = true;
+        }
+
+        function openSettings() {
+            $(#settings-overlay).style#display = "block";
+        }
+
+        function closeSettings() {
+            $(#settings-overlay).style#display = "none";
+        }
+
+        function updateToggle(sw, on) {
+            if (on) {
+                sw.attributes.addClass("on");
+            } else {
+                sw.attributes.removeClass("on");
+            }
+        }
+
+        $(#ua-set-btn).onClick = function() { openPwSettings(); };
+
+        $(#sw-ua).onClick = function() {
+            var sw = $(#sw-ua);
+            var isOn = sw.attributes.hasClass("on");
+            updateToggle(sw, !isOn);
+            $(#set-option-flag).text = "unattended-access|" + (!isOn ? "Y" : "N");
+        };
+        $(#settings-gear).onClick = function() { openSettings(); };
+        $(#settings-close).onClick = function() { closeSettings(); };
+        $(#settings-backdrop).onClick = function() { closeSettings(); };
+
+        $(#toggle-keyboard).onClick = function() {
+            var sw = $(#sw-keyboard);
+            var isOn = sw.attributes.hasClass("on");
+            updateToggle(sw, !isOn);
+            $(#set-option-flag).text = "enable-keyboard|" + (!isOn ? "Y" : "N");
+        };
+
+        $(#toggle-clipboard).onClick = function() {
+            var sw = $(#sw-clipboard);
+            var isOn = sw.attributes.hasClass("on");
+            updateToggle(sw, !isOn);
+            $(#set-option-flag).text = "enable-clipboard|" + (!isOn ? "Y" : "N");
+        };
+
+        $(#toggle-file).onClick = function() {
+            var sw = $(#sw-file);
+            var isOn = sw.attributes.hasClass("on");
+            updateToggle(sw, !isOn);
+            $(#set-option-flag).text = "enable-file-transfer|" + (!isOn ? "Y" : "N");
+        };
+
+        $(#action-password).onClick = function() {
+            closeSettings();
+            openPwSettings();
+        };
+
+        $(#action-language).onClick = function() {
+            closeSettings();
+            initLangList();
+            $(#lang-overlay).style#display = "block";
+        };
+
+        $(#action-about).onClick = function() {
+            closeSettings();
+            $(#about-overlay).style#display = "block";
+        };
+
+        event click $(#about-close) {
+            $(#about-overlay).style#display = "none";
+        }
+
+        // Language dialog
+        event click $(#lang-overlay) (evt) {
+            if (evt.target === $(#lang-overlay)) {
+                $(#lang-overlay).style#display = "none";
+            }
+        }
+
+        event click $(.lang-item) (evt, el) {
+            var code = el.attributes["data-code"];
+            if (!code) return;
+
+            for (var item in $$(#lang-list .lang-item)) {
+                item.attributes.removeClass("selected");
+            }
+            el.attributes.addClass("selected");
+
+            $(#current-lang-code).text = code;
+            $(#set-lang-flag).text = code;
+            $(#current-lang-display).text = el.text;
+
+            $(#lang-overlay).style#display = "none";
+        }
+
+        $(#link-website).onClick = function() {
+            $(#open-url-flag).text = "https://www.hoptodesk.com";
+        };
+
+        $(#link-privacy).onClick = function() {
+            $(#open-url-flag).text = "https://www.hoptodesk.com/privacy";
+        };
+
+        $(#link-agpl).onClick = function() {
+            $(#open-url-flag).text = "https://www.gnu.org/licenses/agpl-3.0.en.html";
+        };
+
+        $(#link-source).onClick = function() {
+            $(#open-url-flag).text = "https://gitlab.com/hoptodesk/hoptodesk/";
+        };
+
+        event click $(#pw-settings-save) {
+            var pw1 = $(#perm-pw1).value || "";
+            var pw2 = $(#perm-pw2).value || "";
+            if (pw1.length == 0 && pw2.length == 0) {
+
+                $(#set-perm-pw-flag).text = "__CLEAR__";
+                $(#pw-settings-overlay).style#display = "none";
+                return;
+            }
+            if (pw1.length < 6) {
+                $(#perm-pw-error).text = tr("Password must be at least 6 characters");
+                return;
+            }
+            if (pw1 != pw2) {
+                $(#perm-pw-error).text = tr("Passwords do not match");
+                return;
+            }
+            $(#set-perm-pw-flag).text = pw1;
+            $(#pw-settings-overlay).style#display = "none";
+        }
+
+        event click $(#pw-settings-cancel) {
+            $(#pw-settings-overlay).style#display = "none";
+        }
+
+        event click $(button#connect) {
+            var id = ($(#remote-id).value || "").replace(/ /g, "");
+            if (!id) return;
+            $(#connect-target).text = id;
+        }
+
+        event click $(button#file-transfer) {
+            var id = ($(#remote-id).value || "").replace(/ /g, "");
+            if (!id) return;
+            $(#ft-target).text = id;
+        }
+
+        event click $(#tab-recent) {
+            $(#tab-recent).attributes.addClass("active");
+            $(#tab-recent).attributes.removeClass("inactive");
+            $(#tab-fav).attributes.addClass("inactive");
+            $(#tab-fav).attributes.removeClass("active");
+            $(#tab-switch-flag).text = "recent";
+        }
+
+        event click $(#tab-fav) {
+            $(#tab-fav).attributes.addClass("active");
+            $(#tab-fav).attributes.removeClass("inactive");
+            $(#tab-recent).attributes.addClass("inactive");
+            $(#tab-recent).attributes.removeClass("active");
+            $(#tab-switch-flag).text = "fav";
+        }
+
+        event click $(div.session-item) (evt, el) {
+            var id = el.attributes["data-id"];
+            if (id) $(#remote-id).value = formatId(id);
+        }
+
+        event dblclick $(div.session-item) (evt, el) {
+            var id = el.attributes["data-id"];
+            if (id) $(#connect-target).text = id;
+        }
+
+        event click $(.session-fav) (evt, el) {
+            var item = el.parent;
+            var id = item.attributes["data-id"];
+            if (id) $(#fav-toggle-flag).text = id;
+            return true;
+        }
+
+        event click $(.session-menu) (evt, el) {
+            var item = el.parent;
+            var id = item.attributes["data-id"];
+            if (id) $(#ctx-menu-flag).text = id;
+            return true;
+        }
+
+        var ctx_peer_id = "";
+        var ctx_is_fav = false;
+
+        function showCtxMenuById(id) {
+            if (!id) return;
+            ctx_peer_id = id;
+
+            ctx_is_fav = false;
+            $(#ctx-add-fav).style#display = "block";
+            $(#ctx-remove-fav).style#display = "none";
+
+            var menuEl = $(#ctx-menu);
+            menuEl.style#left = "80px";
+            menuEl.style#top = "200px";
+            $(#ctx-menu-overlay).style#display = "block";
+        }
+
+        var _ctxOverflowEls = [];
+        function showCtxMenu(el) {
+
+            var item = el;
+            while (item && !(item.attributes["class"] || "").match(/session-item/)) {
+                item = item.parent;
+            }
+            if (!item) return;
+            ctx_peer_id = item.attributes["data-id"] || "";
+            if (!ctx_peer_id) return;
+
+            var favEl = item.select(".session-fav");
+            ctx_is_fav = favEl && (favEl.attributes["class"] || "").indexOf("is-fav") >= 0;
+            $(#ctx-add-fav).style#display = ctx_is_fav ? "none" : "block";
+            $(#ctx-remove-fav).style#display = ctx_is_fav ? "block" : "none";
+
+            _ctxOverflowEls = [];
+            var p = $(#ctx-menu-overlay).parent;
+            while (p && p.tag != "html") {
+                var ov = p.style#overflow;
+                if (ov == "hidden" || ov == "auto" || ov == "scroll" || ov == "scroll-indicator") {
+                    _ctxOverflowEls.push(p);
+                    p.style#overflow = "visible";
+                }
+                var ovy = p.style["overflow-y"];
+                if (ovy == "hidden" || ovy == "auto" || ovy == "scroll" || ovy == "scroll-indicator") {
+                    if (_ctxOverflowEls.indexOf(p) < 0) _ctxOverflowEls.push(p);
+                    p.style["overflow-y"] = "visible";
+                }
+                p = p.parent;
+            }
+
+            var bh = el.box(#height);
+            var root = $(html);
+            var sx = el.box(#left, #screen);
+            var sy = el.box(#top, #screen);
+            var rx = root.box(#left, #screen);
+            var ry = root.box(#top, #screen);
+            var bx = sx - rx;
+            var by = sy - ry + bh;
+            var menuEl = $(#ctx-menu);
+            menuEl.style#left = bx + "px";
+            menuEl.style#top = by + "px";
+            $(#ctx-menu-overlay).style#display = "block";
+        }
+
+        function hideCtxMenu() {
+            $(#ctx-menu-overlay).style#display = "none";
+
+            for (var el in _ctxOverflowEls) {
+                el.style#overflow = undefined;
+                el.style["overflow-y"] = undefined;
+            }
+            _ctxOverflowEls = [];
+            ctx_peer_id = "";
+        }
+
+        $(#ctx-menu-overlay).onClick = function() { hideCtxMenu(); };
+
+        $(#ctx-connect).onClick = function() {
+            if (ctx_peer_id) $(#connect-target).text = ctx_peer_id;
+            hideCtxMenu();
+        };
+        $(#ctx-transfer).onClick = function() {
+            if (ctx_peer_id) $(#ft-target).text = ctx_peer_id;
+            hideCtxMenu();
+        };
+        $(#ctx-wol).onClick = function() {
+            if (ctx_peer_id) $(#wol-flag).text = ctx_peer_id;
+            hideCtxMenu();
+        };
+        $(#ctx-set-mac).onClick = function() {
+            if (!ctx_peer_id) { hideCtxMenu(); return; }
+            hideCtxMenu();
+            $(#mac-input).value = "";
+            $(#mac-error).text = "";
+            $(#mac-overlay).style#display = "block";
+            $(#mac-input).state.focus = true;
+        };
+        $(#ctx-rename).onClick = function() {
+            if (!ctx_peer_id) { hideCtxMenu(); return; }
+            hideCtxMenu();
+
+            $(#rename-input).value = "";
+            $(#rename-overlay).style#display = "block";
+            $(#rename-input).state.focus = true;
+        };
+        $(#ctx-add-fav).onClick = function() {
+            if (ctx_peer_id) $(#fav-toggle-flag).text = ctx_peer_id;
+            hideCtxMenu();
+        };
+        $(#ctx-remove-fav).onClick = function() {
+            if (ctx_peer_id) $(#fav-toggle-flag).text = ctx_peer_id;
+            hideCtxMenu();
+        };
+        $(#ctx-forget-pw).onClick = function() {
+            if (ctx_peer_id) $(#forget-pw-flag).text = ctx_peer_id;
+            hideCtxMenu();
+        };
+        $(#ctx-remove).onClick = function() {
+            if (ctx_peer_id) $(#remove-peer-flag).text = ctx_peer_id;
+            hideCtxMenu();
+        };
+
+        event click $(#rename-cancel) {
+            $(#rename-overlay).style#display = "none";
+        }
+        event click $(#rename-save) {
+            var alias = $(#rename-input).value || "";
+            if (ctx_peer_id) {
+                $(#rename-peer-flag).text = ctx_peer_id + "|" + alias;
+            }
+            $(#rename-overlay).style#display = "none";
+        }
+
+        event click $(#mac-cancel) {
+            $(#mac-overlay).style#display = "none";
+        }
+        event click $(#mac-save) {
+            var mac = ($(#mac-input).value || "").toUpperCase().replace(/-/g, ":");
+            var re = /^[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}$/;
+            if (!re.test(mac)) {
+                $(#mac-error).text = "Invalid MAC format (use AA:BB:CC:DD:EE:FF)";
+                return;
+            }
+            if (ctx_peer_id) {
+                $(#set-mac-flag).text = ctx_peer_id + "|" + mac;
+            }
+            $(#mac-overlay).style#display = "none";
+        }
+
+    </script>
+</body>
+</html>

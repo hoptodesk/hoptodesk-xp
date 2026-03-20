@@ -1,0 +1,1241 @@
+<html window-resizable>
+<head>
+<title>HopToDesk</title>
+<style>
+    body {
+        margin: 0;
+        overflow: hidden;
+        font-family: Tahoma, Helvetica, Verdana, Arial;
+        background: #0F172A;
+    }
+
+    #header-bar {
+        display: none;
+        height: 33px;
+        background: white;
+        border-bottom: 1px solid #E2E8F0;
+        flow: horizontal;
+        padding: 0 4px;
+        vertical-align: middle;
+        border-spacing: 2px;
+        vertical-align: middle;
+        position: relative;
+        z-index: 100;
+    }
+
+    #peer-name {
+        margin: * 0;
+        width: *;
+        font-size: 12px;
+        font-weight: 600;
+        color: #1E293B;
+        overflow: hidden;
+        white-space: nowrap;
+    }
+
+    .tb-btn {
+        padding: 3px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        border-radius: 4px;
+        border: none;
+        vertical-align: middle;
+        font-weight: 600;
+    }
+    .tb-blue {
+        background: #2C8CFF;
+        color: white;
+    }
+    .tb-blue:hover { background: #1A7AEF; }
+    .tb-blue:active { background: #0B6AD7; }
+    .tb-blue.disabled { background: #94A3B8; }
+    .tb-red {
+        background: #EF4444;
+        color: white;
+    }
+    .tb-red:hover { background: #DC2626; }
+    .tb-red:active { background: #B91C1C; }
+    .tb-sep { width: 1px; height: 20px; background: #E2E8F0; margin: * 2px; }
+    .tb-conn-info { font-size: 10px; color: #94A3B8; margin: * 4px; }
+
+    #chat-panel {
+        display: none;
+        position: absolute;
+        right: 0;
+        top: 33px;
+        bottom: 0;
+        width: 280px;
+        background: white;
+        border-left: 1px solid #E2E8F0;
+        flow: vertical;
+        z-index: 50;
+    }
+    #chat-header {
+        padding: 8px 12px;
+        font-weight: 600;
+        font-size: 13px;
+        border-bottom: 1px solid #E2E8F0;
+        color: #1E293B;
+    }
+    #chat-msgs-view {
+        size: *;
+        overflow-y: auto;
+        padding: 8px;
+        font-size: 12px;
+        line-height: 1.5em;
+    }
+    #chat-msgs-view div.chat-msg { margin-bottom: 6px; }
+    #chat-msgs-view b { color: #2C8CFF; }
+    #chat-msgs-view b.me { color: #22C55E; }
+    #chat-input-bar {
+        flow: horizontal;
+        padding: 6px 8px;
+        border-top: 1px solid #E2E8F0;
+        border-spacing: 4px;
+    }
+    #chat-input {
+        width: *;
+        height: 28px;
+        border: 1px solid #CED4DA;
+        border-radius: 4px;
+        padding: 0 6px;
+        font-size: 12px;
+    }
+    #chat-send-btn {
+        background: #2C8CFF;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 0 12px;
+        height: 28px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    #chat-send-btn:hover { background: #1A7AEF; }
+
+    #canvas {
+        position: absolute;
+        left: 0;
+        top: 33px;
+        right: 0;
+        bottom: 0;
+        background: transparent;
+        cursor: default;
+    }
+
+    #status-overlay {
+        position: absolute;
+        left: 0;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        background: #0F172A;
+        color: white;
+        font-size: 16px;
+        text-align: center;
+        vertical-align: middle;
+        z-index: 200;
+    }
+
+    #password-overlay {
+        display: none;
+        position: absolute;
+        left: 0;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        background: #0F172A;
+        text-align: center;
+        vertical-align: middle;
+        z-index: 300;
+    }
+
+    #password-dialog {
+        width: 320px;
+        background: white;
+        border: 1px solid #475569;
+        border-radius: 8px;
+        padding: 24px;
+        margin: * auto;
+    }
+
+    #pw-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1E293B;
+        margin-bottom: 4px;
+    }
+
+    #pw-message {
+        font-size: 12px;
+        color: #6C757D;
+        margin-bottom: 16px;
+    }
+
+    #pw-input-wrap {
+        flow: horizontal;
+        border: 1px solid #CED4DA;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        padding: 0;
+    }
+
+    #pw-input {
+        width: *;
+        height: 32px;
+        border: none;
+        padding: 0 8px;
+        font-size: 13px;
+    }
+
+    #pw-eye {
+        width: 32px;
+        height: 32px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        color: #9CA3AF;
+        font-size: 14px;
+        vertical-align: middle;
+        text-align: center;
+    }
+
+    #pw-eye:hover {
+        color: #6C757D;
+    }
+
+    #pw-remember-wrap {
+        flow: horizontal;
+        margin-bottom: 16px;
+        font-size: 12px;
+        color: #374151;
+        border-spacing: 6px;
+    }
+
+    #pw-buttons {
+        flow: horizontal;
+        border-spacing: 8px;
+    }
+
+    #pw-buttons button {
+        width: *;
+        height: 32px;
+        border-radius: 4px;
+        font-size: 13px;
+        cursor: pointer;
+        border: 1px solid #CED4DA;
+    }
+
+    #pw-cancel {
+        background: white;
+        color: #374151;
+    }
+
+    #pw-cancel:hover {
+        background: #F3F4F6;
+    }
+
+    #pw-submit {
+        background: #0D6EFD !important;
+        color: white !important;
+        border-color: #0D6EFD !important;
+        font-weight: 600;
+    }
+
+    #pw-submit:hover {
+        background: #0B5ED7 !important;
+    }
+
+    .hidden-flag {
+        visibility: hidden;
+        height: 0;
+        overflow: hidden;
+    }
+
+    #file-transfer-wrapper {
+        display: none;
+        position: absolute;
+        left: 0;
+        top: 33px;
+        right: 0;
+        bottom: 0;
+        background: #F3F4F6;
+        flow: vertical;
+        padding: 6px;
+        border-spacing: 6px;
+    }
+
+    #file-transfer {
+        size: *;
+        flow: horizontal;
+        border-spacing: 6px;
+    }
+
+    .ft-section {
+        size: *;
+        background: white;
+        border-radius: 8px;
+        padding: 8px;
+        border-spacing: 6px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        flow: vertical;
+    }
+
+    .ft-title {
+        flow: horizontal;
+        border-spacing: 8px;
+        padding: 4px 0;
+    }
+
+    .ft-title span {
+        margin: * 0;
+        color: #6C757D;
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .ft-toolbar {
+        flow: horizontal;
+        border-spacing: 4px;
+    }
+
+    .ft-toolbar button {
+        padding: 4px 8px;
+        border: 1px solid #CED4DA;
+        border-radius: 4px;
+        background: white;
+        font-size: 11px;
+        cursor: pointer;
+    }
+
+    .ft-toolbar button:hover {
+        background: #E5E7EB;
+    }
+
+    .ft-toolbar .ft-path {
+        width: *;
+        height: 24px;
+        border: 1px solid #CED4DA;
+        border-radius: 4px;
+        padding: 0 6px;
+        font-size: 11px;
+    }
+
+    .ft-toolbar .ft-path:focus {
+        border-color: #0D6EFD;
+    }
+
+    .ft-send-btn {
+        background: white !important;
+        border: 1px solid #0D6EFD !important;
+        color: #0D6EFD;
+        font-weight: 600;
+    }
+
+    .ft-send-btn:hover {
+        background: #0D6EFD !important;
+        color: white !important;
+    }
+
+    .ft-table {
+        size: *;
+        border: 1px solid #E5E7EB;
+        border-radius: 6px;
+        overflow: hidden;
+        flow: vertical;
+    }
+
+    .ft-thead {
+        flow: horizontal;
+        background: #F7F8FA;
+        border-bottom: 1px solid #E5E7EB;
+        padding: 6px 8px;
+        font-weight: 600;
+        font-size: 11px;
+        color: #6C757D;
+    }
+
+    .ft-thead .ft-col-icon { width: 24px; }
+    .ft-thead .ft-col-name { width: *; }
+    .ft-thead .ft-col-date { width: 120px; }
+    .ft-thead .ft-col-size { width: 60px; text-align: right; }
+
+    .ft-tbody {
+        size: *;
+        overflow-y: auto;
+        overflow-x: hidden;
+        background: white;
+    }
+
+    .ft-row {
+        flow: horizontal;
+        padding: 4px 8px;
+        font-size: 12px;
+        color: #1E293B;
+        cursor: pointer;
+        border-bottom: 1px solid #F3F4F6;
+    }
+
+    .ft-row:hover {
+        background: #F0F7FF;
+    }
+
+    .ft-row.selected {
+        background: #E3F2FD;
+        color: #1E293B;
+    }
+
+    .ft-col-icon { width: 24px; min-width: 24px; text-align: center; }
+    .ft-col-name { size: *; color: #007BFF; overflow: hidden; white-space: nowrap; }
+    .ft-col-date { width: 120px; min-width: 120px; color: #9CA3AF; font-size: 11px; }
+    .ft-col-size { width: 60px; min-width: 60px; text-align: right; color: #9CA3AF; font-size: 11px; }
+
+    .ft-icon-folder { color: #F59E0B; }
+    .ft-icon-file { color: #6B7280; }
+
+    #job-table {
+        min-height: 60px;
+        max-height: 140px;
+        background: white;
+        border: 1px solid #E5E7EB;
+        border-radius: 6px;
+        overflow-y: auto;
+        padding: 4px;
+    }
+
+    .job-row {
+        padding: 4px 8px;
+        border-bottom: 1px solid #F3F4F6;
+        font-size: 11px;
+        color: #007BFF;
+    }
+
+    .job-status-finished {
+        color: #28A745;
+    }
+
+    .job-status-error {
+        color: #EF4444;
+    }
+</style>
+</head>
+<body>
+    <div id="header-bar">
+        <div id="peer-name">Connecting...</div>
+        <div class="tb-sep"></div>
+        <button class="tb-btn tb-blue" id="tb-fullscreen">Fullscreen</button>
+        <button class="tb-btn tb-blue" id="tb-ctrl-alt-del">Ctrl+Alt+Del</button>
+        <button class="tb-btn tb-blue" id="tb-lock">Lock</button>
+        <button class="tb-btn tb-blue" id="tb-restart">Restart</button>
+        <div class="tb-sep"></div>
+        <button class="tb-btn tb-blue" id="tb-transfer">Transfer File</button>
+        <button class="tb-btn tb-blue" id="tb-chat">Chat</button>
+        <button class="tb-btn tb-blue" id="tb-switch-sides">Switch Sides</button>
+        <button class="tb-btn tb-blue" id="tb-screenshot">Screenshot</button>
+        <div class="tb-sep"></div>
+        <button class="tb-btn tb-red" id="tb-disconnect">Disconnect</button>
+    </div>
+
+    <div id="canvas"></div>
+
+    <div id="chat-panel">
+        <div id="chat-header">Chat <span id="chat-close" style="cursor:pointer; float:right;">X</span></div>
+        <div id="chat-msgs-view"></div>
+        <div id="chat-input-bar">
+            <input type="text" id="chat-input" placeholder="Type a message..." />
+            <button id="chat-send-btn">Send</button>
+        </div>
+    </div>
+
+    <div id="status-overlay">Authenticating...</div>
+
+    <div id="password-overlay">
+        <div id="password-dialog">
+            <div id="pw-title">Password Required</div>
+            <div id="pw-message">Please enter the password</div>
+            <div id="pw-input-wrap">
+                <input type="password" id="pw-input" placeholder="Password" />
+                <button id="pw-eye">&#128065;</button>
+            </div>
+            <div id="pw-buttons">
+                <button id="pw-cancel">Cancel</button>
+                <button id="pw-submit">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="file-transfer-wrapper">
+        <div id="file-transfer">
+
+            <div class="ft-section" id="local-panel">
+                <div class="ft-title"><span>Local Computer</span></div>
+                <div class="ft-toolbar">
+                    <button id="local-home">Home</button>
+                    <button id="local-up">Up</button>
+                    <input type="text" class="ft-path" id="local-path" />
+                    <button id="local-refresh">Refresh</button>
+                </div>
+                <div class="ft-toolbar">
+                    <button class="ft-send-btn" id="local-send">Send &gt;&gt;</button>
+                    <button id="local-delete">Delete</button>
+                </div>
+                <div class="ft-table">
+                    <div class="ft-thead">
+                        <div class="ft-col-icon"></div><div class="ft-col-name">Name</div><div class="ft-col-date">Modified</div><div class="ft-col-size">Size</div>
+                    </div>
+                    <div class="ft-tbody" id="local-files"></div>
+                </div>
+            </div>
+
+            <div class="ft-section" id="remote-panel">
+                <div class="ft-title"><span>Remote Computer</span></div>
+                <div class="ft-toolbar">
+                    <button id="remote-home">Home</button>
+                    <button id="remote-up">Up</button>
+                    <input type="text" class="ft-path" id="remote-path" />
+                    <button id="remote-refresh">Refresh</button>
+                </div>
+                <div class="ft-toolbar">
+                    <button class="ft-send-btn" id="remote-receive">&lt;&lt; Receive</button>
+                    <button id="remote-delete">Delete</button>
+                </div>
+                <div class="ft-table">
+                    <div class="ft-thead">
+                        <div class="ft-col-icon"></div><div class="ft-col-name">Name</div><div class="ft-col-date">Modified</div><div class="ft-col-size">Size</div>
+                    </div>
+                    <div class="ft-tbody" id="remote-files"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="job-table"></div>
+    </div>
+
+    <div id="mouse-event" class="hidden-flag"></div>
+    <div id="key-event" class="hidden-flag"></div>
+    <div id="disconnect-flag" class="hidden-flag"></div>
+    <div id="frame-width" class="hidden-flag">0</div>
+    <div id="frame-height" class="hidden-flag">0</div>
+    <div id="video-offset-x" class="hidden-flag">0</div>
+    <div id="video-offset-y" class="hidden-flag">0</div>
+    <div id="video-scale-w" class="hidden-flag">0</div>
+    <div id="video-scale-h" class="hidden-flag">0</div>
+
+    <div id="retry-password" class="hidden-flag"></div>
+
+    <div id="ft-read-local-dir" class="hidden-flag"></div>
+    <div id="ft-read-remote-dir" class="hidden-flag"></div>
+    <div id="ft-send-files" class="hidden-flag"></div>
+    <div id="ft-cancel-job" class="hidden-flag"></div>
+    <div id="ft-create-dir" class="hidden-flag"></div>
+    <div id="ft-remove-file" class="hidden-flag"></div>
+    <div id="ft-remove-dir" class="hidden-flag"></div>
+    <div id="ft-remove-dir-all" class="hidden-flag"></div>
+    <div id="ft-send-confirm" class="hidden-flag"></div>
+    <div id="chat-send-flag" class="hidden-flag"></div>
+    <div id="transfer-flag" class="hidden-flag"></div>
+    <div id="screenshot-flag" class="hidden-flag"></div>
+    <div id="switch-sides-flag" class="hidden-flag"></div>
+
+    <script type="text/tiscript">
+
+        $(#key-event).text = "debug_script_start";
+        var IS_FT = __IS_FILE_TRANSFER__;
+        var HOME_DIR = "__HOME_DIR__";
+
+        var canvas = $(#canvas);
+        var frame_w_el = $(#frame-width);
+        var frame_h_el = $(#frame-height);
+        var video_off_x_el = $(#video-offset-x);
+        var video_off_y_el = $(#video-offset-y);
+        var video_scale_w_el = $(#video-scale-w);
+        var video_scale_h_el = $(#video-scale-h);
+        var mouse_el = $(#mouse-event);
+        var key_el = $(#key-event);
+        var entered = false;
+
+        view.windowMinSize = (400, 250);
+
+        var local_path = "";
+        var local_entries = [];
+        var local_selected = -1;
+        var remote_path = "";
+        var remote_entries = [];
+        var remote_selected = -1;
+        var remote_home_dir = "";
+        var next_job_id = 1;
+        var jobs = [];
+        var job_map = {};
+        var show_hidden = false;
+        var chatbox;
+        var chat_msgs = [];
+
+        function getSize(size) {
+            if (!size) return "";
+            size = size.toFloat();
+            if (size < 1024) return size.toInteger() + "B";
+            if (size < 1024 * 1024) return (size / 1024).toInteger() + "K";
+            if (size < 1024 * 1024 * 1024) return ((size / (1024 * 1024)) * 10).toInteger() / 10.0 + "M";
+            return ((size / (1024 * 1024 * 1024)) * 10).toInteger() / 10.0 + "G";
+        }
+
+        function formatTime(ts) {
+            if (!ts) return "";
+            var d = new Date(ts.toFloat() * 1000);
+            return d.toLocaleString();
+        }
+
+        function getParentPath(path) {
+            var i = path.lastIndexOf("\\");
+            if (i <= 0) {
+                i = path.lastIndexOf("/");
+                if (i <= 0) return "";
+            }
+            if (i == 2 && path.length > 1 && path[1] == ':') return path.substr(0, 3);
+            return path.substr(0, i);
+        }
+
+        function escapeHtml(s) {
+            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+        }
+
+        function getNowStr() {
+            var now = new Date();
+            return String.printf("%02d:%02d:%02d", now.hour, now.minute, now.second);
+        }
+
+        function sendMsg(text) {
+            chat_msgs.push({text: text, name: "me", time: getNowStr()});
+            $(#chat-send-flag).text = text;
+        }
+
+        function startChat() {
+            if (chatbox) {
+                chatbox.windowState = View.WINDOW_SHOWN;
+                return;
+            }
+            var (sx, sy, sw, sh) = view.screenBox(#workarea, #rectw);
+            var w = 300;
+            var h = 400;
+            var x = (sx + sw - w) / 2;
+            var y = sy + 80;
+
+            var chatHtml = "<html window-resizable><head><style>"
+                + "body { margin:0; font-family:Tahoma,Helvetica,Verdana,Arial; background:white; }"
+                + "#msgs { position:absolute; left:0; top:0; right:0; bottom:38px; overflow-y:auto; padding:8px; font-size:12px; line-height:1.5em; }"
+                + "div.msg { margin-bottom:8px; }"
+                + "div.msg-name { font-weight:600; font-size:11px; }"
+                + "div.msg-name.them { color:#2C8CFF; }"
+                + "div.msg-name.me { color:#22C55E; }"
+                + "span.msg-time { color:#94A3B8; font-size:10px; margin-left:6px; }"
+                + "div.msg-text { margin-top:2px; }"
+                + "#send-bar { position:absolute; left:0; right:0; bottom:0; height:38px; flow:horizontal; padding:5px 8px; border-top:1px solid #E2E8F0; background:#F8F9FA; border-spacing:4px; }"
+                + "#chat-input { width:*; height:28px; border:1px solid #CED4DA; border-radius:4px; padding:0 6px; font-size:12px; }"
+                + "#chat-input:focus { border-color:#2C8CFF; }"
+                + "#send-btn { background:#2C8CFF; color:white; border:none; border-radius:4px; padding:0 12px; height:28px; font-size:12px; font-weight:600; cursor:pointer; }"
+                + "#send-btn:hover { background:#1A7AEF; }"
+                + "</style></head><body>"
+                + "<div id=\"msgs\"></div>"
+                + "<div id=\"send-bar\"><input type=\"text\" id=\"chat-input\" placeholder=\"Type a message...\" /><button id=\"send-btn\">Send</button></div>"
+                + "<script type=\"text/tiscript\">"
+                + "var p = view.parameters;"
+                + "var msgs = p.msgs;"
+                + "var lastCount = 0;"
+                + "function esc(s) { return s.replace(String.$(&),\"&amp;\").replace(String.$(<),\"&lt;\").replace(String.$(>),\"&gt;\"); }"
+                + "function renderMsgs() {"
+                + "  if (msgs.length == lastCount) return;"
+                + "  lastCount = msgs.length;"
+                + "  var el = $(#msgs);"
+                + "  var html = \"\";"
+                + "  for (var i = 0; i < msgs.length; i++) {"
+                + "    var m = msgs[i];"
+                + "    var cls = m.name == \"me\" ? \"me\" : \"them\";"
+                + "    var name = m.name == \"me\" ? \"Me\" : esc(m.name);"
+                + "    html = html + \"<div class=msg><div class='msg-name \" + cls + \"'>\" + name + \" <span class=msg-time>\" + (m.time || \"\") + \"</span></div><div class=msg-text>\" + esc(m.text) + \"</div></div>\";"
+                + "  }"
+                + "  el.html = html;"
+                + "  var y = el.box(#height, #content) - el.box(#height, #client);"
+                + "  if (y > 0) el.scrollTo(0, y);"
+                + "}"
+                + "function doSend() { var inp = $(#chat-input); var text = (inp.value || \"\").trim(); inp.value = \"\"; if (text.length == 0) return; if (p.callback) p.callback(text); renderMsgs(); inp.state.focus = true; }"
+                + "$(#send-btn).onClick = function() { doSend(); };"
+                + "$(#chat-input).onKey = function(evt) { if (evt.type == Event.KEY_DOWN && evt.keyCode == 13) { doSend(); return true; } return false; };"
+                + "function self.closing() { view.windowState = View.WINDOW_HIDDEN; return false; }"
+                + "self.timer(300, function() { renderMsgs(); return true; });"
+                + "renderMsgs();"
+                + "$(#chat-input).state.focus = true;"
+                + "</" + "script>"
+                + "</body></html>";
+
+            chatbox = view.window({
+                type: View.FRAME_WINDOW,
+                x: x, y: y, width: w, height: h,
+                client: true,
+                parameters: { callback: sendMsg, msgs: chat_msgs },
+                caption: "Chat",
+                html: chatHtml,
+            });
+            try { chatbox.windowIcon = self.url("icon.ico"); } catch(e) {}
+        }
+
+        function renderFileList(container, entries, path, selectedIdx) {
+            var html = "";
+            if (path && path != "/" && path.length > 3) {
+                html += "<div class=\"ft-row\" data-idx=\"-1\" data-name=\"..\" data-type=\"1\">";
+                html += "<div class=\"ft-col-icon ft-icon-folder\">&#9650;</div><div class=\"ft-col-name\">..</div><div class=\"ft-col-date\"></div><div class=\"ft-col-size\"></div></div>";
+            }
+            for (var i = 0; i < entries.length; i++) {
+                var e = entries[i];
+                var eType = e["type"] || 0;
+                var eName = e["name"] || "";
+                var eSize = e["size"] || 0;
+                var eMtime = e["time"] || 0;
+                var isDir = eType >= 1 && eType <= 3;
+                var icon = isDir ? "&#9632;" : "&#9633;";
+                var iconCls = isDir ? "ft-icon-folder" : "ft-icon-file";
+                var cls = (i == selectedIdx) ? "ft-row selected" : "ft-row";
+                var sz = isDir ? "" : getSize(eSize);
+                var tm = formatTime(eMtime);
+                var safeN = escapeHtml(eName);
+                html += "<div class=\"" + cls + "\" data-idx=\"" + i + "\" data-name=\"" + safeN + "\" data-type=\"" + eType + "\">";
+                html += "<div class=\"ft-col-icon " + iconCls + "\">" + icon + "</div>";
+                html += "<div class=\"ft-col-name\">" + safeN + "</div>";
+                html += "<div class=\"ft-col-date\">" + tm + "</div>";
+                html += "<div class=\"ft-col-size\">" + sz + "</div>";
+                html += "</div>";
+            }
+            container.html = html;
+        }
+
+        function readLocalDir(path) {
+            $(#ft-read-local-dir).text = path + "|" + (show_hidden ? "1" : "0");
+        }
+
+        function readRemoteDir(path) {
+            $(#ft-read-remote-dir).text = path + "|" + (show_hidden ? "1" : "0");
+        }
+
+        function updateLocalFolderFiles(fd) {
+            local_path = fd["path"] || "";
+            local_entries = fd["entries"] || [];
+            local_selected = -1;
+            $(#local-path).value = local_path;
+            renderFileList($(#local-files), local_entries, local_path, local_selected);
+        }
+
+        function updateFolderFiles(fd) {
+            if (fd["id"] && fd["id"] > 0) {
+                var job = job_map[fd["id"]];
+                if (job) {
+                    job.entries = fd["entries"] || [];
+                    job.total_size = fd["total_size"] || 0;
+                    job.num_entries = fd["num_entries"] || (fd["entries"] ? fd["entries"].length : 0);
+                    updateJobDisplay();
+                }
+                return;
+            }
+            remote_path = fd["path"] || "";
+            remote_entries = fd["entries"] || [];
+            remote_selected = -1;
+            if (!remote_home_dir) remote_home_dir = remote_path;
+            $(#remote-path).value = remote_path;
+            renderFileList($(#remote-files), remote_entries, remote_path, remote_selected);
+        }
+
+        function jobDone(id, file_num) {
+            var job = job_map[id];
+            if (job) {
+                job.finished = true;
+                updateJobDisplay();
+
+                if (local_path) readLocalDir(local_path);
+                if (remote_path) readRemoteDir(remote_path);
+            }
+        }
+
+        function jobError(id, err, file_num) {
+            var job = job_map[id];
+            if (job) {
+                job.error = err;
+                job.finished = true;
+                updateJobDisplay();
+            }
+        }
+
+        function overrideFileConfirm(id, file_num, to, is_upload, is_identical) {
+            $(#ft-send-confirm).text = id + "|" + file_num + "|0|0";
+        }
+
+        function joinPath(base, name) {
+            if (!base || base == "/") return name;
+
+            var sep = (base.indexOf("/") >= 0) ? "/" : "\\";
+            if (base[base.length - 1] == "\\" || base[base.length - 1] == "/") return base + name;
+            return base + sep + name;
+        }
+
+        function sendFiles(path, is_remote) {
+            var to;
+            if (is_remote) {
+                to = local_path;
+            } else {
+                to = remote_path;
+            }
+            if (!to) return;
+
+            var fileName = path;
+            var sep = path.lastIndexOf("\\");
+            if (sep < 0) sep = path.lastIndexOf("/");
+            if (sep >= 0) fileName = path.substr(sep + 1);
+
+            to = joinPath(to, fileName);
+
+            var id = next_job_id;
+            next_job_id += 1;
+
+            var job = {
+                id: id,
+                path: path,
+                to: to,
+                is_remote: is_remote,
+                finished: false,
+                error: null,
+                entries: null,
+                total_size: 0,
+                finished_size: 0,
+                file_num: 0,
+                num_entries: 0,
+                speed: 0
+            };
+            jobs.push(job);
+            job_map[id] = job;
+
+            $(#ft-send-files).text = id + "|" + path + "|" + to + "|0|" + (show_hidden ? "1" : "0") + "|" + (is_remote ? "1" : "0");
+            updateJobDisplay();
+        }
+
+        function updateJobDisplay() {
+            var html = "";
+            for (var i = 0; i < jobs.length; i++) {
+                var job = jobs[i];
+
+                var arrow = job.is_remote ? "\u2190" : "\u2192";
+
+                var status = "Waiting...";
+                var statusClass = "job-status";
+                if (job.finished) {
+                    if (job.error) {
+                        status = "Error: " + job.error;
+                        statusClass = "job-status-error";
+                    } else {
+                        status = "Finished";
+                        if (job.entries && job.entries.length > 0) {
+                            var n = job.num_entries || job.entries.length;
+                            status += " " + n + " file" + (n > 1 ? "s" : "");
+                            if (job.total_size > 0) status += ", " + getSize(job.total_size);
+                        }
+                        statusClass = "job-status-finished";
+                    }
+                } else if (job.entries && job.entries.length > 0) {
+                    var n = job.num_entries || job.entries.length;
+                    var fn = job.file_num + 1;
+                    if (fn > n) fn = n;
+                    status = fn + " / " + n + " files";
+                    if (job.total_size > 0) {
+                        var pct = ((100.0 * job.finished_size / job.total_size)).toInteger();
+                        status += ", " + getSize(job.finished_size) + " / " + getSize(job.total_size) + ", " + pct + "%";
+                    }
+                    if (job.speed > 0) status += ", " + getSize(job.speed) + "/s";
+                }
+
+                var displayPath = job.path;
+                var sep = displayPath.lastIndexOf("\\");
+                if (sep < 0) sep = displayPath.lastIndexOf("/");
+                if (sep >= 0) displayPath = displayPath.substr(sep + 1);
+
+                html += "<div class=\"job-row " + statusClass + "\">";
+                html += arrow + " " + escapeHtml(displayPath) + " - " + status;
+                html += "</div>";
+            }
+            if (html == "") html = "<div class=\"job-row\" style=\"color:#6B7280\">No transfers</div>";
+            $(#job-table).html = html;
+        }
+
+        function jobProgress(id, file_num, speed, finished_size) {
+            var job = job_map[id];
+            if (job) {
+                job.file_num = file_num;
+                job.speed = speed;
+                job.finished_size = finished_size;
+                updateJobDisplay();
+            }
+        }
+
+        event click $(#local-files > div.ft-row) (evt, el) {
+            var idx = (el.attributes["data-idx"] || "-1").toInteger();
+            local_selected = idx;
+            renderFileList($(#local-files), local_entries, local_path, local_selected);
+        }
+
+        event dblclick $(#local-files > div.ft-row) (evt, el) {
+            var name = el.attributes["data-name"];
+            var type = (el.attributes["data-type"] || "0").toInteger();
+            if (name == "..") {
+                var parent = getParentPath(local_path);
+                if (parent) readLocalDir(parent);
+                else readLocalDir("");
+            } else if (type >= 1 && type <= 3) {
+                readLocalDir(joinPath(local_path, name));
+            }
+        }
+
+        event click $(#remote-files > div.ft-row) (evt, el) {
+            var idx = (el.attributes["data-idx"] || "-1").toInteger();
+            remote_selected = idx;
+            renderFileList($(#remote-files), remote_entries, remote_path, remote_selected);
+        }
+
+        event dblclick $(#remote-files > div.ft-row) (evt, el) {
+            var name = el.attributes["data-name"];
+            var type = (el.attributes["data-type"] || "0").toInteger();
+            if (name == "..") {
+                var parent = getParentPath(remote_path);
+                if (parent) readRemoteDir(parent);
+                else readRemoteDir("");
+            } else if (type >= 1 && type <= 3) {
+                readRemoteDir(joinPath(remote_path, name));
+            }
+        }
+
+        event click $(#local-home) { readLocalDir(HOME_DIR); }
+
+        event click $(#local-up) {
+            var parent = getParentPath(local_path);
+            if (parent) readLocalDir(parent);
+            else readLocalDir("");
+        }
+
+        event click $(#local-refresh) { if (local_path) readLocalDir(local_path); }
+
+        $(#local-path).onKey = function(evt) {
+            if (evt.type == Event.KEY_DOWN && evt.keyCode == 13) {
+                readLocalDir(this.value);
+                return true;
+            }
+            return false;
+        };
+
+        event click $(#remote-home) {
+            if (remote_home_dir) readRemoteDir(remote_home_dir);
+            else readRemoteDir("");
+        }
+
+        event click $(#remote-up) {
+            var parent = getParentPath(remote_path);
+            if (parent) readRemoteDir(parent);
+            else readRemoteDir("");
+        }
+
+        event click $(#remote-refresh) { if (remote_path) readRemoteDir(remote_path); }
+
+        $(#remote-path).onKey = function(evt) {
+            if (evt.type == Event.KEY_DOWN && evt.keyCode == 13) {
+                readRemoteDir(this.value);
+                return true;
+            }
+            return false;
+        };
+
+        event click $(#local-send) {
+            if (local_selected >= 0 && local_selected < local_entries.length) {
+                var e = local_entries[local_selected];
+                sendFiles(joinPath(local_path, e["name"]), false);
+            }
+        }
+
+        event click $(#remote-receive) {
+            if (remote_selected >= 0 && remote_selected < remote_entries.length) {
+                var e = remote_entries[remote_selected];
+                sendFiles(joinPath(remote_path, e["name"]), true);
+            }
+        }
+
+        event click $(#local-delete) {
+            if (local_selected >= 0 && local_selected < local_entries.length) {
+                var e = local_entries[local_selected];
+                var path = joinPath(local_path, e["name"]);
+                if (e["type"] >= 1 && e["type"] <= 3) {
+                    $(#ft-remove-dir-all).text = "0|" + path + "|0|1";
+                } else {
+                    $(#ft-remove-file).text = "0|" + path + "|0|0";
+                }
+                self.timer(500, function() { readLocalDir(local_path); });
+            }
+        }
+
+        event click $(#remote-delete) {
+            if (remote_selected >= 0 && remote_selected < remote_entries.length) {
+                var e = remote_entries[remote_selected];
+                var path = joinPath(remote_path, e["name"]);
+                if (e["type"] >= 1 && e["type"] <= 3) {
+                    $(#ft-remove-dir-all).text = "0|" + path + "|1|1";
+                } else {
+                    $(#ft-remove-file).text = "0|" + path + "|0|1";
+                }
+                self.timer(500, function() { readRemoteDir(remote_path); });
+            }
+        }
+
+        event click $(.job-cancel) (evt, el) {
+            var id = (el.attributes["data-job-id"] || "0").toInteger();
+            if (id > 0) {
+                $(#ft-cancel-job).text = "" + id;
+                var job = job_map[id];
+                if (job) { job.finished = true; job.error = "Cancelled"; }
+                updateJobDisplay();
+            }
+        }
+
+        canvas.onMouse = function(evt) {
+            var frame_w = (frame_w_el.text || "0").toInteger();
+            var frame_h = (frame_h_el.text || "0").toInteger();
+            if (frame_w <= 0 || frame_h <= 0) return false;
+
+            var cw = canvas.box(#width, #border);
+            var ch = canvas.box(#height, #border);
+            if (cw <= 0 || ch <= 0) return false;
+
+            var mask = -1;
+            var wheel_dx = 0;
+            var wheel_dy = 0;
+
+            switch(evt.type) {
+                case Event.MOUSE_DOWN:
+                    mask = 1;
+                    break;
+                case Event.MOUSE_UP:
+                    mask = 2;
+                    break;
+                case Event.MOUSE_MOVE:
+                    mask = 0;
+                    break;
+                case Event.MOUSE_WHEEL:
+                    mask = 3;
+                    {
+                        var (dx, dy) = evt.wheelDeltas;
+                        if (dx > 3) dx = 3;
+                        else if (dx < -3) dx = -3;
+                        if (dy > 3) dy = 3;
+                        else if (dy < -3) dy = -3;
+                        wheel_dx = dx.toInteger();
+                        wheel_dy = dy.toInteger();
+                        if (wheel_dx == 0 && wheel_dy == 0) return true;
+                    }
+                    break;
+                case Event.MOUSE_DCLICK:
+                    mask = 1;
+                    break;
+                case Event.MOUSE_ENTER:
+                    entered = true;
+                    return true;
+                case Event.MOUSE_LEAVE:
+                    entered = false;
+                    return true;
+                default:
+                    return false;
+            }
+
+            if (mask < 0) return false;
+
+            var x = 0;
+            var y = 0;
+
+            if (mask == 0) {
+                var off_x = (video_off_x_el.text || "0").toInteger();
+                var off_y = (video_off_y_el.text || "0").toInteger();
+                var scale_w = (video_scale_w_el.text || "0").toInteger();
+                var scale_h = (video_scale_h_el.text || "0").toInteger();
+                if (scale_w > 0 && scale_h > 0) {
+                    x = (((evt.x.toFloat() - off_x) / scale_w) * frame_w).toInteger();
+                    y = (((evt.y.toFloat() - off_y) / scale_h) * frame_h).toInteger();
+                } else {
+                    x = ((evt.x.toFloat() / cw) * frame_w).toInteger();
+                    y = ((evt.y.toFloat() / ch) * frame_h).toInteger();
+                }
+                if (x < 0) x = 0;
+                if (y < 0) y = 0;
+                if (x >= frame_w) x = frame_w - 1;
+                if (y >= frame_h) y = frame_h - 1;
+            } else if (mask == 3) {
+                x = wheel_dx;
+                y = wheel_dy;
+            }
+
+            var buttons = evt.buttons || 1;
+            var alt = evt.altKey ? 1 : 0;
+            var ctrl = evt.ctrlKey ? 1 : 0;
+            var shift = evt.shiftKey ? 1 : 0;
+
+            mouse_el.text = mask + "," + x + "," + y + "," + buttons + "," + alt + "," + ctrl + "," + shift;
+            return true;
+        };
+
+        self.onKey = function(evt) {
+            if (!entered) return false;
+
+            var down_or_up;
+            if (evt.type == Event.KEY_DOWN) down_or_up = 0;
+            else if (evt.type == Event.KEY_UP) down_or_up = 1;
+            else return true;
+
+            var alt = evt.altKey ? 1 : 0;
+            var ctrl = evt.ctrlKey ? 1 : 0;
+            var shift = evt.shiftKey ? 1 : 0;
+
+            key_el.text = down_or_up + "," + evt.keyCode + "," + alt + "," + ctrl + "," + shift;
+            return true;
+        };
+
+        function showEl(el) { if (el) el.style#display = "block"; }
+        function hideEl(el) { if (el) el.style#display = "none"; }
+
+        self.showConnected = function() {
+            showEl($(#header-bar));
+            hideEl($(#status-overlay));
+            hideEl($(#password-overlay));
+
+            $(#canvas).style#top = "33px";
+        };
+
+        var pw_visible = false;
+
+        function showPasswordDialog(title, message) {
+            $(#pw-title).text = title || "Password Required";
+            $(#pw-message).text = message || "Please enter the password";
+            $(#pw-input).value = "";
+            pw_visible = false;
+            $(#pw-input).attributes["type"] = "password";
+            hideEl($(#status-overlay));
+            showEl($(#password-overlay));
+            $(#pw-input).state.focus = true;
+        }
+
+        function hidePasswordDialog() {
+            hideEl($(#password-overlay));
+        }
+
+        event click $(#pw-eye) {
+            pw_visible = !pw_visible;
+            $(#pw-input).attributes["type"] = pw_visible ? "text" : "password";
+        }
+
+        event click $(#pw-submit) {
+            var pw = $(#pw-input).value || "";
+            if (pw.length > 0) {
+                hidePasswordDialog();
+                $(#status-overlay).text = "Connecting...";
+                $(#status-overlay).style#color = "white";
+                showEl($(#status-overlay));
+                $(#retry-password).text = pw;
+            }
+        }
+
+        event click $(#pw-cancel) {
+            hidePasswordDialog();
+            $(#disconnect-flag).text = "1";
+        }
+
+        $(#pw-input).onKey = function(evt) {
+            if (evt.type == Event.KEY_DOWN && evt.keyCode == 13) {
+                var pw = this.value || "";
+                if (pw.length > 0) {
+                    hidePasswordDialog();
+                    $(#status-overlay).text = "Connecting...";
+                    $(#status-overlay).style#color = "white";
+                    showEl($(#status-overlay));
+                    $(#retry-password).text = pw;
+                }
+                return true;
+            }
+            return false;
+        };
+
+        $(#key-event).text = "debug_init_start_ft=" + IS_FT;
+
+        if (IS_FT) {
+            hideEl($(#canvas));
+            hideEl($(#status-overlay));
+            hideEl($(#header-bar));
+            showEl($(#file-transfer-wrapper));
+            $(#file-transfer-wrapper).style#top = "0px";
+            view.windowCaption = "File Transfer";
+            readLocalDir(HOME_DIR);
+            readRemoteDir("");
+        }
+
+        self.updateFolderFiles = updateFolderFiles;
+        self.updateLocalFolderFiles = updateLocalFolderFiles;
+        self.jobDone = jobDone;
+        self.jobError = jobError;
+        self.jobProgress = jobProgress;
+        self.overrideFileConfirm = overrideFileConfirm;
+        self.showPasswordDialog = showPasswordDialog;
+
+        $(#key-event).text = "debug_toolbar_init";
+
+        $(#tb-fullscreen).onClick = function() {
+            if (view.windowState == View.WINDOW_FULL_SCREEN) {
+                view.windowState = View.WINDOW_SHOWN;
+                this.text = "Fullscreen";
+            } else {
+                view.windowState = View.WINDOW_FULL_SCREEN;
+                this.text = "Exit Fullscreen";
+            }
+        };
+
+        $(#tb-ctrl-alt-del).onClick = function() {
+            $(#key-event).text = "cad";
+        };
+
+        $(#tb-transfer).onClick = function() {
+            $(#transfer-flag).text = "1";
+        };
+
+        $(#tb-chat).onClick = function() {
+            startChat();
+        };
+
+        $(#tb-restart).onClick = function() {
+            view.msgbox(#question, "Restart", "Are you sure you want to restart the remote computer?", function(res) {
+                if (res) $(#key-event).text = "restart";
+            });
+        };
+
+        $(#tb-lock).onClick = function() {
+            $(#key-event).text = "lock";
+        };
+
+        $(#tb-screenshot).onClick = function() {
+            $(#screenshot-flag).text = "1";
+        };
+
+        $(#tb-switch-sides).onClick = function() {
+            $(#switch-sides-flag).text = "1";
+        };
+
+        $(#tb-disconnect).onClick = function() {
+            $(#disconnect-flag).text = "disconnect";
+        };
+
+        self.updatePeerName = function(name) {
+            $(#peer-name).text = name;
+        };
+
+        self.chatReceived = function(sender, text) {
+            chat_msgs.push({text: text, name: sender, time: getNowStr()});
+            startChat();
+        };
+    </script>
+</body>
+</html>
