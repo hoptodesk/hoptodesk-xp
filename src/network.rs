@@ -102,12 +102,9 @@ impl FramedStream {
             let port: u16 = addr[pos + 1..].parse().map_err(|e| {
                 io::Error::new(io::ErrorKind::InvalidInput, format!("bad port: {}", e))
             })?;
-            let addrs: Vec<std::net::SocketAddr> =
-                std::net::ToSocketAddrs::to_socket_addrs(&(host, port))?.collect();
-            if addrs.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::NotFound, "DNS resolve failed"));
-            }
-            TcpStream::connect_timeout(&addrs[0], timeout)?
+            // Use proxy-aware TCP connect
+            crate::tls_client::connect_tcp_timeout(host, port, timeout)
+                .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?
         } else {
             TcpStream::connect(addr)?
         };

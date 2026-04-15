@@ -392,5 +392,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Password must be at least 6 characters", "Password must be at least 6 characters"),
         ("Passwords do not match", "Passwords do not match"),
 
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
+        ("Type", "Type"),
     ].iter().cloned().collect();
 }

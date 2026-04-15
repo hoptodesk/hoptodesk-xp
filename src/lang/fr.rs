@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Vide"),
         ("Invalid folder name", "Nom de dossier invalide"),
         ("SOCKS5 Proxy", "SOCKS5 Agents"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Découvert"),
         ("install_daemon_tip", "Pour une exécution au démarrage du système, vous devez installer le service système."),
         ("Remote ID", "ID de l'appareil à distance"),

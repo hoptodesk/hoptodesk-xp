@@ -328,7 +328,30 @@ impl RemoteHandler {
 
     fn take_screenshot(&self, _display: i32, _path: String) {}
 
-    fn record_screen(&self, _on: bool, _display: i32, _w: i32, _h: i32) {}
+    fn record_screen(&self, on: bool, _display: i32, _w: i32, _h: i32) {
+        if let Ok(mut state) = self.client_state.lock() {
+            if on && !state.recording {
+                let w = state.frame_width as u32;
+                let h = state.frame_height as u32;
+                if w > 0 && h > 0 {
+                    match crate::recording::Recorder::new(w, h, "remote") {
+                        Ok(rec) => {
+                            state.recorder = Some(rec);
+                            state.recording = true;
+                            crate::config::write_log("[recording] Started");
+                        }
+                        Err(e) => {
+                            crate::config::write_log(&format!("[recording] Failed to start: {}", e));
+                        }
+                    }
+                }
+            } else if !on && state.recording {
+                state.recording = false;
+                state.recorder = None;
+                crate::config::write_log("[recording] Stopped");
+            }
+        }
+    }
 
     fn is_wayland_no_grab(&self) -> bool { false }
 

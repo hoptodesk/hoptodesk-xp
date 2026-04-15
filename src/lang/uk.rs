@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Пусто"),
         ("Invalid folder name", "Неприпустима назва теки"),
         ("SOCKS5 Proxy", "Проксі-сервер SOCKS5"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Знайдено"),
         ("install_daemon_tip", "Для запуску під час завантаження необхідно встановити системну службу"),
         ("Remote ID", "Віддалений ідентифікатор"),

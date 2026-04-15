@@ -9,9 +9,49 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const API_URL: &str = "http://api.hoptodesk.com/";
-const FALLBACK_HOST: &str = "signal.hoptodesk.com";
-const FALLBACK_PORT: u16 = 80;
+const DEFAULT_API_HOST: &str = "api.hoptodesk.com";
+
+/// Returns the custom network URL if set, otherwise the default API URL.
+pub fn get_api_url() -> String {
+    let custom = crate::config::Config2::load().get_option("custom-rendezvous-server");
+    if !custom.is_empty() {
+        return custom;
+    }
+    format!("https://{}/", DEFAULT_API_HOST)
+}
+
+/// Fetch from API URL, trying HTTPS first then falling back to HTTP.
+pub fn api_get() -> Result<String, String> {
+    let custom = crate::config::Config2::load().get_option("custom-rendezvous-server");
+    if !custom.is_empty() {
+        crate::config::write_log(&format!("[api] Using custom URL: {}", custom));
+        return crate::wininet::http_get(&custom);
+    }
+    // Try HTTPS first, fall back to HTTP if empty or error
+    let https_url = format!("https://{}/", DEFAULT_API_HOST);
+    crate::config::write_log(&format!("[api] Fetching {}", https_url));
+    let https_result = crate::wininet::http_get(&https_url);
+    let use_https = match &https_result {
+        Ok(body) if !body.is_empty() => {
+            crate::config::write_log(&format!("[api] HTTPS OK ({} bytes)", body.len()));
+            true
+        }
+        Ok(_) => {
+            crate::config::write_log("[api] HTTPS returned empty response, falling back to HTTP");
+            false
+        }
+        Err(e) => {
+            crate::config::write_log(&format!("[api] HTTPS failed: {}", e));
+            false
+        }
+    };
+    if use_https {
+        return https_result;
+    }
+    let http_url = format!("http://{}/", DEFAULT_API_HOST);
+    crate::config::write_log(&format!("[api] Fetching {}", http_url));
+    crate::wininet::http_get(&http_url)
+}
 const HEALTHCHECK: &str = r#"{"protocol":"one-to-self","data":"healthcheck"}"#;
 const HEALTHCHECK_TIMEOUT: u64 = 90;
 const SERVER_TIMEOUT: u64 = 30;
@@ -64,10 +104,11 @@ pub struct SignalMessage {
 }
 
 fn discover_signal_server() -> Result<(String, u16), String> {
-    match wininet::http_get(API_URL) {
+    crate::config::write_log("[signal] Discovering signal server...");
+    match api_get() {
         Ok(body) => {
+            crate::config::write_log(&format!("[signal] API response: {}", &body[..body.len().min(300)]));
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-
                 if let Some(obj) = json.get("rendezvous").and_then(|v| v.as_object()) {
                     let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or("");
                     let port = obj
@@ -76,21 +117,15 @@ fn discover_signal_server() -> Result<(String, u16), String> {
                         .unwrap_or("21118");
                     if !host.is_empty() {
                         let port_num: u16 = port.parse().unwrap_or(21118);
+                        crate::config::write_log(&format!("[signal] Discovered server: {}:{}", host, port_num));
                         return Ok((host.to_string(), port_num));
                     }
                 }
             }
-            crate::config::write_log(&format!(
-                "[signal] API returned no valid rendezvous server, using fallback"
-            ));
-            Ok((FALLBACK_HOST.to_string(), FALLBACK_PORT))
+            Err("API returned no valid rendezvous server".into())
         }
         Err(e) => {
-            crate::config::write_log(&format!(
-                "[signal] API call failed ({}), using fallback {}:{}",
-                e, FALLBACK_HOST, FALLBACK_PORT
-            ));
-            Ok((FALLBACK_HOST.to_string(), FALLBACK_PORT))
+            Err(format!("API call failed: {}", e))
         }
     }
 }
@@ -286,6 +321,13 @@ fn handle_connect_request(
 ) {
     let sender_id = cr.sender_id.clone();
 
+    // Check if incoming connections are disabled
+    let cfg = crate::config::Config2::load();
+    if cfg.get_option("stop-service") == "Y" {
+        crate::config::write_log(&format!("[signal] Rejecting connection from {} — incoming connections disabled", sender_id));
+        return;
+    }
+
     if let Ok(mut state) = signal_state.lock() {
         state.incoming_session = Some(IncomingSession {
             peer_id: sender_id.clone(),
@@ -293,6 +335,7 @@ fn handle_connect_request(
         });
     }
 
+    let t0 = Instant::now();
     let local_ip = network::get_local_ip();
     let listener = match network::new_listener(&local_ip, 0) {
         Ok(l) => l,
@@ -310,16 +353,18 @@ fn handle_connect_request(
     };
 
     crate::config::write_log(&format!(
-        "[signal] Bound listener at {} for peer {}",
-        crate::config::mask_ip(&listen_addr), sender_id
+        "[signal] Bound listener at {} for peer {} ({}ms)",
+        crate::config::mask_ip(&listen_addr), sender_id, t0.elapsed().as_millis()
     ));
 
+    let t1 = Instant::now();
     let public_addr = turn::get_public_ip()
         .map(|mut a| { a.set_port(listen_addr.port()); a.to_string() })
         .unwrap_or_else(|| listen_addr.to_string());
     let lan_addr = format!("{}:{}", local_ip, listen_addr.port());
 
-    crate::config::write_log(&format!("[signal] Public addr: {}, LAN addr: {}", crate::config::mask_ip(&public_addr), crate::config::mask_ip(&lan_addr)));
+    crate::config::write_log(&format!("[signal] Public addr: {}, LAN addr: {} (get_public_ip took {}ms)",
+        crate::config::mask_ip(&public_addr), crate::config::mask_ip(&lan_addr), t1.elapsed().as_millis()));
 
     let pk_b64 = crate::config::base64_encode(pk);
     let listening = serde_json::json!({
@@ -332,11 +377,14 @@ fn handle_connect_request(
         "lan_ipv4": lan_addr
     });
 
-    if let Err(e) = ws.send_text(&listening.to_string()) {
+    let listening_json = listening.to_string();
+    crate::config::write_log(&format!("[signal] Sending Listening ({}ms since ConnectRequest): {}",
+        t0.elapsed().as_millis(), &listening_json[..listening_json.len().min(300)]));
+    if let Err(e) = ws.send_text(&listening_json) {
         crate::config::write_log(&format!("[signal] Send Listening failed: {}", e));
         return;
     }
-    crate::config::write_log(&format!("[signal] Sent Listening to {}", sender_id));
+    crate::config::write_log(&format!("[signal] Sent Listening to {} (total {}ms)", sender_id, t0.elapsed().as_millis()));
 
     let my_id = my_id.to_string();
     let password = password.to_string();
@@ -365,15 +413,15 @@ fn handle_relay_connection(
 ) {
     crate::config::write_log(&format!("[relay] Connecting to relay at {}...", crate::config::mask_ip(&relay_addr)));
 
-    let addr: std::net::SocketAddr = match relay_addr.parse() {
-        Ok(a) => a,
-        Err(e) => {
-            crate::config::write_log(&format!("[relay] Invalid relay address {}: {}", crate::config::mask_ip(&relay_addr), e));
+    let (relay_host, relay_port) = match relay_addr.rfind(':') {
+        Some(pos) => (&relay_addr[..pos], relay_addr[pos + 1..].parse::<u16>().unwrap_or(21118)),
+        None => {
+            crate::config::write_log(&format!("[relay] Invalid relay address {}", crate::config::mask_ip(&relay_addr)));
             return;
         }
     };
 
-    let tcp_stream = match std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(10)) {
+    let tcp_stream = match crate::tls_client::connect_tcp_timeout(relay_host, relay_port, Duration::from_secs(10)) {
         Ok(s) => s,
         Err(e) => {
             crate::config::write_log(&format!("[relay] Failed to connect to relay {}: {}", crate::config::mask_ip(&relay_addr), e));

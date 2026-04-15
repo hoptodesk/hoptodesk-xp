@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Hutsik"),
         ("Invalid folder name", "Karpeta-izen baliogabea"),
         ("SOCKS5 Proxy", "SOCKS5 proxia"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Aurkituta"),
         ("install_daemon_tip", "Ordenagailua pizterakoan hasteko, sistemaren zerbitzua instalatu behar duzu."),
         ("Remote ID", "Urruneko IDa"),

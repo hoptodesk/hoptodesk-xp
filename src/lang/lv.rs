@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Tukšs"),
         ("Invalid folder name", "Nederīgs mapes nosaukums"),
         ("SOCKS5 Proxy", "SOCKS5 starpniekserveris"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Atklāts"),
         ("install_daemon_tip", "Lai startētu sāknēšanu, ir jāinstalē sistēmas serviss."),
         ("Remote ID", "Attālais ID"),

@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Tyhjä"),
         ("Invalid folder name", "Virheellinen kansion nimi"),
         ("SOCKS5 Proxy", ""),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Löydetty"),
         ("install_daemon_tip", "Palvelun automaattista käynnistystä varten HopToDesk daemon on asennettava järjestelmään."),
         ("Remote ID", "Etätunnus"),

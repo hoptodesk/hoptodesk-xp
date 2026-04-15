@@ -3,18 +3,23 @@
     windows_subsystem = "windows"
 )]
 
+mod auth_2fa;
 mod capture;
 mod client;
 mod clipboard;
+mod clipboard_file;
 mod cm;
 mod config;
 mod crypto;
+mod dashboard;
 mod file_transfer;
 mod input;
 mod lang;
+mod mcp_server;
 mod network;
 mod platform;
 mod protocol;
+mod recording;
 mod remote;
 mod remote_handler;
 mod server;
@@ -23,6 +28,7 @@ mod turn;
 mod ui_handler;
 mod vpx;
 mod websocket;
+mod tls_client;
 mod wininet;
 
 extern "C" {
@@ -160,6 +166,14 @@ fn main() {
                 import_config(&args[2]);
                 std::process::exit(0);
             }
+            "--mcp" => {
+                mcp_server::run();
+                std::process::exit(0);
+            }
+            "--ticket" => {
+                run_ticket_window();
+                std::process::exit(0);
+            }
             _ => {}
         }
     }
@@ -230,8 +244,29 @@ fn run_headless_server() {
     crate::config::write_log(&format!("[server] Starting headless server, ID={}", my_id));
     crate::config::write_log(&format!("[server] Press Ctrl+C to stop"));
 
+    // Start direct IP access server in background
+    {
+        let my_id = my_id.clone();
+        let password = password.clone();
+        let pk = pk.clone();
+        std::thread::spawn(move || {
+            server::run_direct_server(my_id, password, pk);
+        });
+    }
+
     let signal_state = Arc::new(Mutex::new(signal::SignalState::default()));
     signal::run_signal_loop(my_id, password, pk, signal_state);
+}
+
+fn run_ticket_window() {
+    sciter::set_options(sciter::RuntimeOptions::GfxLayer(sciter::GFX_LAYER::CPU)).ok();
+    let mut frame = sciter::Window::new();
+    let html = include_str!("ui/ticket.html");
+    frame.load_html(html.as_bytes(), Some("this://app/ticket.html"));
+    frame.set_title("HopToDesk - Tickets");
+    let hwnd = frame.get_hwnd();
+    set_window_icon(hwnd);
+    frame.run_app();
 }
 
 fn build_ui_translations() -> String {
@@ -240,13 +275,29 @@ fn build_ui_translations() -> String {
         "Remote Control", "Partner ID", "Enter Remote ID", "Connect",
         "Transfer File", "Recent Sessions", "Favorites", "Settings",
         "Remote Access", "Keyboard/Mouse", "Clipboard", "File Transfer",
-        "Security", "Permanent Password", "About HopToDesk",
+        "Remote Restart", "TCP Tunneling", "Remote Printing", "Wake On LAN",
+        "Network", "Choose Network", "Proxy Settings", "Direct IP Access", "LAN Discovery",
+        "Security", "Permanent Password", "Allow Incoming Connections",
+        "Two-Factor Authentication", "Appearance", "Dark Theme",
+        "Dashboard", "Linked", "Enter Invite Code",
+        "About HopToDesk",
         "Password Settings", "Cancel", "Save", "Language",
         "Rename", "Add to Favorites", "Remove from Favorites",
         "Forget Password", "Remove", "Rename Peer", "Enter alias",
         "Connecting...", "Ready", "Not connected",
         "Website", "Privacy Statement", "OK", "Version",
         "Password must be at least 6 characters", "Passwords do not match",
+        "Enable", "Disable", "Verify", "On", "Off",
+        "Enter your 6-digit code", "2FA enabled successfully",
+        "Invalid code, please try again", "2FA has been disabled",
+        "Scan this QR code or enter the secret manually in your authenticator app:",
+        "This device is linked to a dashboard.",
+        "Enter your invite code to link this device to a dashboard.",
+        "Invalid invite code. Must be 16 characters (letters and numbers).",
+        "Linking to dashboard... This device will appear in the dashboard shortly.",
+        "Hostname", "Username", "Type",
+        "HopToDesk Network (Default)", "Custom",
+        "Incoming Connections Off.",
     ];
 
     let mut parts = Vec::new();
@@ -280,26 +331,7 @@ fn get_lang_name(code: &str) -> String {
 }
 
 fn send_wol_packet(mac_str: &str) {
-    let mac_bytes: Vec<u8> = mac_str.split(':')
-        .filter_map(|s| u8::from_str_radix(s, 16).ok())
-        .collect();
-    if mac_bytes.len() != 6 {
-        config::write_log(&format!("[WOL] Invalid MAC: {}", mac_str));
-        return;
-    }
-    let mut packet = vec![0xFFu8; 6];
-    for _ in 0..16 {
-        packet.extend_from_slice(&mac_bytes);
-    }
-    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        let _ = socket.set_broadcast(true);
-        match socket.send_to(&packet, "255.255.255.255:9") {
-            Ok(_) => config::write_log(&format!("[WOL] Magic packet sent to {}", mac_str)),
-            Err(e) => config::write_log(&format!("[WOL] Send failed: {}", e)),
-        }
-    } else {
-        config::write_log("[WOL] Failed to bind UDP socket");
-    }
+    dashboard::send_wol_packet(mac_str);
 }
 
 fn run_main_ui() {
@@ -326,6 +358,27 @@ fn run_main_ui() {
         });
     }
 
+    // Start direct IP access server thread
+    {
+        let state_clone = state.clone();
+        thread::spawn(move || {
+            let (my_id, password, pk) = {
+                let s = state_clone.lock().unwrap();
+                (
+                    s.config.id.clone(),
+                    s.config.password.clone(),
+                    s.config.key_pair.1.clone(),
+                )
+            };
+            server::run_direct_server(my_id, password, pk);
+        });
+    }
+
+    // Start dashboard background thread
+    thread::spawn(|| {
+        dashboard::start();
+    });
+
     sciter::set_options(sciter::RuntimeOptions::GfxLayer(sciter::GFX_LAYER::CPU)).ok();
 
     let mut frame = sciter::Window::new();
@@ -349,6 +402,36 @@ fn run_main_ui() {
     let current_lang_name = get_lang_name(&current_lang_code);
     let tr_json = build_ui_translations();
 
+    let (proxy_json, options_json) = {
+        let cfg2 = config::Config2::load();
+        let proxy = cfg2.get_option("socks-proxy");
+        let username = cfg2.get_option("socks-username");
+        let password = cfg2.get_option("socks-password");
+        let proxy_type = cfg2.get_option("socks-proxy-type");
+        let pj = serde_json::json!({
+            "proxy": proxy,
+            "username": username,
+            "password": password,
+            "proxy_type": if proxy_type.is_empty() { "auto".to_string() } else { proxy_type }
+        }).to_string();
+        let oj = serde_json::json!({
+            "enable-keyboard": cfg2.get_option("enable-keyboard"),
+            "enable-clipboard": cfg2.get_option("enable-clipboard"),
+            "enable-file-transfer": cfg2.get_option("enable-file-transfer"),
+            "enable-remote-restart": cfg2.get_option("enable-remote-restart"),
+            "enable-tunnel": cfg2.get_option("enable-tunnel"),
+            "enable-remote-printing": cfg2.get_option("enable-remote-printing"),
+            "enable-wol": cfg2.get_option("enable-wol"),
+            "direct-server": cfg2.get_option("direct-server"),
+            "enable-lan-discovery": cfg2.get_option("enable-lan-discovery"),
+            "stop-service": cfg2.get_option("stop-service"),
+            "allow-darktheme": cfg2.get_option("allow-darktheme"),
+            "dashboard_user_id": cfg2.get_option("dashboard_user_id"),
+            "custom-rendezvous-server": cfg2.get_option("custom-rendezvous-server"),
+        }).to_string();
+        (pj, oj)
+    };
+
     let html = html_template
         .replace("Loading...", &id_formatted)
         .replace("------", &my_password)
@@ -359,7 +442,14 @@ fn run_main_ui() {
         .replace("id=\"tr-data\" style=\"visibility:hidden;height:0;overflow:hidden;\"></div>",
                  &format!("id=\"tr-data\" style=\"visibility:hidden;height:0;overflow:hidden;\">{}</div>", tr_json))
         .replace("id=\"current-lang-code\" style=\"visibility:hidden;height:0;overflow:hidden;\"></div>",
-                 &format!("id=\"current-lang-code\" style=\"visibility:hidden;height:0;overflow:hidden;\">{}</div>", current_lang_code));
+                 &format!("id=\"current-lang-code\" style=\"visibility:hidden;height:0;overflow:hidden;\">{}</div>", current_lang_code))
+        .replace("id=\"proxy-data\" style=\"visibility:hidden;height:0;overflow:hidden;\"></div>",
+                 &format!("id=\"proxy-data\" style=\"visibility:hidden;height:0;overflow:hidden;\">{}</div>", proxy_json))
+        .replace("id=\"2fa-status\" style=\"visibility:hidden;height:0;overflow:hidden;\"></div>",
+                 &format!("id=\"2fa-status\" style=\"visibility:hidden;height:0;overflow:hidden;\">{}</div>",
+                     if auth_2fa::has_valid_2fa() { "on" } else { "" }))
+        .replace("id=\"options-data\" style=\"visibility:hidden;height:0;overflow:hidden;\"></div>",
+                 &format!("id=\"options-data\" style=\"visibility:hidden;height:0;overflow:hidden;\">{}</div>", options_json));
 
     frame.load_html(html.as_bytes(), Some("this://app/index.html"));
     frame.set_title("HopToDesk");
@@ -612,6 +702,23 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
+    if let Ok(Some(mut el)) = root.find_first("#set-proxy-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Ok(mut s) = state.lock() {
+                    s.config2.set_option("socks-proxy", v["proxy"].as_str().unwrap_or(""));
+                    s.config2.set_option("socks-username", v["username"].as_str().unwrap_or(""));
+                    s.config2.set_option("socks-password", v["password"].as_str().unwrap_or(""));
+                    s.config2.set_option("socks-proxy-type", v["proxy_type"].as_str().unwrap_or("auto"));
+                    s.config2.save();
+                    config::write_log(&format!("[proxy] Proxy settings saved: {}", v["proxy"].as_str().unwrap_or("")));
+                }
+            }
+        }
+    }
+
     if let Ok(Some(mut el)) = root.find_first("#set-lang-flag") {
         let text = el.get_text();
         if !text.is_empty() {
@@ -647,6 +754,95 @@ unsafe extern "system" fn main_timer_callback(
             let _ = el.set_text("");
             let _ = std::process::Command::new("cmd")
                 .args(&["/C", "start", &text])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+        }
+    }
+
+    // 2FA generate
+    if let Ok(Some(mut el)) = root.find_first("#2fa-generate-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            config::write_log("[2FA] Generate requested");
+            let url = auth_2fa::generate2fa();
+            config::write_log(&format!("[2FA] Generated URL ({} chars)", url.len()));
+            let qr_uri = auth_2fa::generate_qr_data_uri(&url);
+            config::write_log(&format!("[2FA] QR data URI ({} chars)", qr_uri.len()));
+            if let Ok(Some(mut qr_el)) = root.find_first("#2fa-qr-data") {
+                let _ = qr_el.set_text(&qr_uri);
+            }
+            if let Ok(Some(mut url_el)) = root.find_first("#2fa-url-data") {
+                let _ = url_el.set_text(&url);
+            }
+        }
+    }
+
+    // 2FA verify
+    if let Ok(Some(mut el)) = root.find_first("#2fa-verify-flag") {
+        let code = el.get_text();
+        if !code.is_empty() {
+            let _ = el.set_text("");
+            let result = if auth_2fa::verify2fa(&code) { "ok" } else { "fail" };
+            if let Ok(Some(mut res_el)) = root.find_first("#2fa-verify-result") {
+                let _ = res_el.set_text(result);
+            }
+            if result == "ok" {
+                if let Ok(Some(mut status_el)) = root.find_first("#2fa-status") {
+                    let _ = status_el.set_text("on");
+                }
+            }
+        }
+    }
+
+    // 2FA disable
+    if let Ok(Some(mut el)) = root.find_first("#2fa-disable-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            auth_2fa::disable_2fa();
+            if let Ok(Some(mut status_el)) = root.find_first("#2fa-status") {
+                let _ = status_el.set_text("");
+            }
+        }
+    }
+
+    // Custom network URL
+    if let Ok(Some(mut el)) = root.find_first("#set-custom-api-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            if let Ok(mut s) = state.lock() {
+                s.config2.set_option("custom-rendezvous-server", &text);
+                s.config2.save();
+                config::write_log(&format!("[UI] Custom network set to: {}", text));
+            }
+        }
+    }
+
+    // Invite code
+    if let Ok(Some(mut el)) = root.find_first("#set-invite-code-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            if let Ok(mut s) = state.lock() {
+                s.config2.set_option("invite_code", &text);
+                s.config2.save();
+                config::write_log(&format!("[UI] Invite code set: {}", text));
+            }
+        }
+    }
+
+    // Open ticket portal in a separate process
+    if let Ok(Some(mut el)) = root.find_first("#open-ticket-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            let exe = std::env::current_exe().unwrap_or_default();
+            let _ = std::process::Command::new(&exe)
+                .args(["--ticket"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

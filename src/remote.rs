@@ -6,6 +6,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+/// Check if target looks like a direct IP:port address (e.g. "192.168.1.5:21118")
+fn is_direct_ip(target: &str) -> bool {
+    // Must contain a dot (IP address) and a colon (port separator)
+    if let Some(colon) = target.rfind(':') {
+        let host = &target[..colon];
+        let port = &target[colon + 1..];
+        // Port must be numeric
+        if port.parse::<u16>().is_err() {
+            return false;
+        }
+        // Host must look like an IP (contains dots) or be a hostname (not purely numeric ID)
+        host.contains('.') || host.contains(':')
+    } else {
+        false
+    }
+}
+
 struct JobWriteState {
     dest_path: String,
     files: Vec<String>,
@@ -124,6 +141,17 @@ pub fn run_connect_process(target_id: &str, peer_password: &str, is_file_transfe
     thread::spawn(move || {
         if let Ok(mut s) = cs.lock() {
             s.status = "connecting".into();
+        }
+
+        // Direct IP:port connection — bypass signal server
+        if is_direct_ip(&target) {
+            crate::config::write_log(&format!("[connect] Direct IP connection to {}", crate::config::mask_ip(&target)));
+            if ft {
+                client::connect_to_peer_ft(&target, &my_id2, &target, &pw2, cs.clone(), stop.clone());
+            } else {
+                client::connect_to_peer(&target, &my_id2, &target, &pw2, cs.clone(), stop.clone());
+            }
+            return;
         }
 
         let signal_state = Arc::new(Mutex::new(signal::SignalState::default()));

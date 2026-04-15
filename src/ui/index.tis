@@ -336,12 +336,12 @@ class MyIdMenu: Reactor.Component {
                 <div .separator />
                 <li #custom-api-url title={translate('Choose Network')}>{translate('Choose Network')}</li>
                 <li #whitelist style="display:none" title={translate('whitelist_tip')}>{translate('IP Whitelisting')}</li>
-                <li #socks5-server title={translate('SOCKS5 Proxy')}>{translate('SOCKS5 Proxy')}</li>
+                <li #socks5-server title={translate('Proxy Settings')}>{translate('Proxy Settings')}</li>
                 <div .separator />
 				<li #enable-remote-printing style="display:none" title={translate('Enable Remote Printing')}><span>{svg_checkmark}</span>{translate("Enable Remote Printing")}</li>
 				<li #enable-wol title={translate('Enable Wake On LAN')}><span>{svg_checkmark}</span>{translate("Enable Wake On LAN")}</li>
                 <li #stop-service title={translate('Allow Incoming Connections')} class={service_stopped ? "line-through" : "selected"}><span>{svg_checkmark}</span>{translate("Allow Incoming Connections")}</li>
-                <li #tfa title={translate('enable-2fa-title')} class={!handler.has_valid_2fa() ? "" : "selected"}><span>{svg_checkmark}</span>{translate('enable-2fa-title')}</li>
+                <li #tfa title={translate('enable-2fa-title')} class={($(#2fa-status) && $(#2fa-status).text == "on") ? "selected" : ""}><span>{svg_checkmark}</span>{translate('enable-2fa-title')}</li>
                 <DirectServer />
                 <div .separator />
                 <li #allow-darktheme><span>{svg_checkmark}</span>{translate('Dark Theme')}</li>
@@ -406,35 +406,60 @@ class MyIdMenu: Reactor.Component {
 
     function showGen2FA() {
         var me = this;
-        var has_valid_2fa = handler.has_valid_2fa();
+        var has_valid_2fa = ($(#2fa-status) && $(#2fa-status).text == "on");
         if (has_valid_2fa) {
-			handler.set_option('2fa', '');
+            $(#2fa-disable-flag).text = "1";
+            $(#2fa-status).text = "";
             me.update();
         } else {
-            var new2fa = handler.generate2fa();
-            var src = handler.generate_2fa_img_src(new2fa);
-            msgbox("custom-2fa-setting", translate('enter-2fa-setup'),
-                <div .form>
-                    <div>{translate('enable-2fa-desc')}</div>
-                    <center><img title='QR' style='height:160px; width:160px' src={src} /></center>
-					<div>{translate('enable-2fa-desc-verify')}</div>
-                    <center><div .code><input name='code' type='text' maxlength='6' style='width:150px; font-family: \"Courier New\"' .outline-focus /></div></center>
-					<div #wrongalert style='float:left; display:none; margin-right: 10px'>{svg_alert}</div><div #wrongcode style='font-size: 11px; font-weight: 300; display:none; '>{translate('wrong-2fa-code')}</div>
-                </div>
-                , "", function(res=null) {
-				if (!res) return;
-                if (!res.code) return;
-                if (!handler.verify2fa(res.code)) {
-					var el = $(#wrongcode);
-					el.style.set{display: "block"};
-					var elalert = $(#wrongalert);
-					elalert.style.set{display: "block"};
-					return <div></div>;
-                } else {
-					msgbox("custom", translate("Success"), translate("2FA setup successfully."));
-				}
-                me.update();
-            }, 470);
+            // Trigger generation — Rust will populate #2fa-url-data
+            $(#2fa-generate-flag).text = "1";
+            // Wait for Rust to generate the secret (polled on next timer tick)
+            self.timer(500ms, function() {
+                var url = $(#2fa-url-data).text || "";
+                if (!url) return;
+                // Extract the base32 secret from the URL for manual entry
+                var secret = "";
+                var idx = url.indexOf("secret=");
+                if (idx >= 0) {
+                    var rest = url.substr(idx + 7);
+                    var end = rest.indexOf("&");
+                    secret = end >= 0 ? rest.substr(0, end) : rest;
+                }
+                msgbox("custom-2fa-setting", translate('enter-2fa-setup'),
+                    <div .form>
+                        <div>{translate('enable-2fa-desc')}</div>
+                        <div style="margin:8px 0; padding:8px; background:#F0F4F8; border-radius:6px; font-size:0.85em; word-break:break-all;">
+                            <div style="font-weight:700; margin-bottom:4px;">Secret key (enter manually):</div>
+                            <div style="font-family: monospace; letter-spacing: 2px; font-size:1.1em;">{secret}</div>
+                        </div>
+                        <div>{translate('enable-2fa-desc-verify')}</div>
+                        <center><div .code><input name='code' type='text' maxlength='6' style='width:150px; font-family: "Courier New"' .outline-focus /></div></center>
+                        <div #wrongalert style='float:left; display:none; margin-right: 10px'>{svg_alert}</div><div #wrongcode style='font-size: 11px; font-weight: 300; display:none; '>{translate('wrong-2fa-code')}</div>
+                    </div>
+                    , "", function(res=null) {
+                    if (!res) return;
+                    if (!res.code) return;
+                    // Send code to Rust for verification
+                    $(#2fa-verify-flag).text = res.code;
+                    $(#2fa-verify-result).text = "";
+                    // Wait for Rust to verify
+                    self.timer(500ms, function() {
+                        var result = $(#2fa-verify-result).text;
+                        if (result == "ok") {
+                            $(#2fa-status).text = "on";
+                            msgbox("custom", translate("Success"), translate("2FA setup successfully."));
+                            me.update();
+                        } else if (result == "fail") {
+                            var el = $(#wrongcode);
+                            if (el) el.style.set{display: "block"};
+                            var elalert = $(#wrongalert);
+                            if (elalert) elalert.style.set{display: "block"};
+                        }
+                    });
+                    return <div></div>;
+                }, 470);
+            });
         }
 
     }
@@ -619,26 +644,33 @@ class MyIdMenu: Reactor.Component {
 
             }, 240)
         } else if (me.id == "socks5-server") {
-            var socks5 = handler.get_socks() || {};
-            var old_proxy = socks5[0] || "";
-            var old_username = socks5[1] || "";
-            var old_password = socks5[2] || "";
-            msgbox("custom-server", "SOCKS5 Proxy", <div .form .set-password>
+            var proxy_json = $(#proxy-data).text || "{}";
+            var socks5 = {};
+            try { socks5 = JSON.parse(proxy_json); } catch(e) {}
+            var old_proxy = socks5.proxy || "";
+            var old_username = socks5.username || "";
+            var old_password = socks5.password || "";
+            var old_proxy_type = socks5.proxy_type || "auto";
+            msgbox("custom-server", translate("Proxy Settings"), <div .form .set-password>
             <div><span>{translate("Hostname")}:</span><input|text name='proxy' value={old_proxy} /></div>
             <div><span>{translate("Username")}:</span><input|text name='username' value={old_username} /></div>
             <div><span>{translate("Password")}:</span><PasswordComponent value={old_password} /></div>
+            <div><span>{translate("Type")}:</span><select name='proxy_type'>
+                <option value="auto" {old_proxy_type == "auto" ? "selected" : ""}>{translate("Auto Detect")}</option>
+                <option value="socks5" {old_proxy_type == "socks5" ? "selected" : ""}>SOCKS5</option>
+                <option value="http" {old_proxy_type == "http" ? "selected" : ""}>HTTP</option>
+            </select></div>
             </div>
             , "", function(res=null) {
                 if (!res) return;
 				var proxy = (res.proxy || "").trim();
                 var username = (res.username || "").trim();
                 var password = (res.password || "").trim();
-                if (proxy == old_proxy && username == old_username && password == old_password) return;
-                if (proxy) {
-                    var err = handler.test_if_valid_server(proxy);
-                    if (err) return translate("Server") + ": " + err;
-                }
-                handler.set_socks(proxy, username, password);
+                var proxy_type = (res.proxy_type || "auto").trim();
+                if (proxy == old_proxy && username == old_username && password == old_password && proxy_type == old_proxy_type) return;
+                var data = JSON.stringify({proxy: proxy, username: username, password: password, proxy_type: proxy_type});
+                $(#set-proxy-flag).text = data;
+                $(#proxy-data).text = data;
             }, 240);
         } else if (me.id == "stop-service") {
             handler.set_option("stop-service", service_stopped ? "" : "Y");
@@ -888,7 +920,7 @@ class App: Reactor.Component
         function knobStyle(enabled) { return "width:16px;height:16px;border-radius:50%;background:white;position:absolute;top:2px;left:" + (enabled ? "18px" : "2px") + ";box-shadow:0 1px 2px rgba(0,0,0,0.2);"; }
         var darkOn = handler.get_option("allow-darktheme") == "Y";
         var serviceOn = !service_stopped;
-        var tfaOn = handler.has_valid_2fa();
+        var tfaOn = ($(#2fa-status) && $(#2fa-status).text == "on");
         var langs = JSON.parse(handler.get_langs());
         var curLang = handler.get_local_option("lang") || "default";
         var curLangName = "English";
@@ -922,7 +954,7 @@ class App: Reactor.Component
                     <div .settings-section>
                         <div .section-label>{translate("Network")}</div>
                         <div .setting-row .setting-action id="action-custom-api-url"><span .setting-name>{translate("Choose Network")}</span><span .setting-arrow>&#x203A;</span></div>
-                        <div .setting-row .setting-action id="action-socks5-server"><span .setting-name>{translate("SOCKS5 Proxy")}</span><span .setting-arrow>&#x203A;</span></div>
+                        <div .setting-row .setting-action id="action-socks5-server"><span .setting-name>{translate("Proxy Settings")}</span><span .setting-arrow>&#x203A;</span></div>
                         <div .setting-row id="toggle-direct-server"><span .setting-name>{translate("Direct IP Access")}</span><div .toggle-switch style={toggleBg(isEnabled("direct-server"))}><div .toggle-knob style={knobStyle(isEnabled("direct-server"))} /></div></div>
                         <div .setting-row .setting-action id="action-enable-lan-discovery"><span .setting-name>{translate("LAN Discovery")}</span><div .toggle-switch style={toggleBg(isEnabled("enable-lan-discovery"))}><div .toggle-knob style={knobStyle(isEnabled("enable-lan-discovery"))} /></div></div>
                     </div>
@@ -991,7 +1023,7 @@ class App: Reactor.Component
 
     event click $(#ticket-icon) {
         if (handler.get_option("dashboard_user_id") != "") {
-            handler.open_ticket_portal();
+            $(#open-ticket-flag).text = "open";
         } else {
             msgbox("custom-error", translate("Tickets"), translate("Tickets can only be created if this device is linked to a dashboard user."));
         }

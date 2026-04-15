@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "空空如也"),
         ("Invalid folder name", "資料夾名稱無效"),
         ("SOCKS5 Proxy", "SOCKS5 代理"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "已探索"),
         ("install_daemon_tip", "為了能夠開機時自動啟動，請先安裝系統服務。"),
         ("Remote ID", "遠端 ID"),

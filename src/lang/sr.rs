@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Prazno"),
         ("Invalid folder name", "Pogrešno ime direktorijuma"),
         ("SOCKS5 Proxy", "SOCKS5 proksi"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Otkriveno"),
         ("install_daemon_tip", "Za pokretanje pri startu sistema, treba da instalirate sistemski servis."),
         ("Remote ID", "Udaljeni ID"),

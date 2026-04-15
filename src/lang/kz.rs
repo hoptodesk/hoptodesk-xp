@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Бос"),
         ("Invalid folder name", "Бұрыс бума атауы"),
         ("SOCKS5 Proxy", "SOCKS5 Proxy"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Табылды"),
         ("install_daemon_tip", "Бут кезінде қосылу үшін жүйелік сербесті орнатуыныз керек."),
         ("Remote ID", "Қашықтағы ID"),

@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Tuščia"),
         ("Invalid folder name", "Neteisingas aplanko pavadinimas"),
         ("SOCKS5 Proxy", "SOCKS5 Proxy"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Aptikta tinkle"),
         ("install_daemon_tip", "Norėdami, kad HopToDesk startuotų automatiškai, turite ją įdiegti"),
         ("Remote ID", "Nuotolinis ID"),

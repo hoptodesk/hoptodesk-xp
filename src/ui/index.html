@@ -427,12 +427,14 @@
             display: none;
             position: fixed;
             left: 0; top: 0; right: 0; bottom: 0;
+            z-index: 100;
         }
 
         #settings-backdrop {
             position: fixed;
             left: 0; top: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.3);
+            z-index: 100;
         }
 
         #settings-panel {
@@ -443,6 +445,7 @@
             background: white;
             flow: vertical;
             overflow-y: auto;
+            z-index: 101;
         }
 
         .settings-header {
@@ -549,6 +552,7 @@
             background: rgba(0,0,0,0.4);
             text-align: center;
             vertical-align: middle;
+            z-index: 200;
         }
 
         #pw-settings-dialog {
@@ -619,6 +623,7 @@
             background: rgba(0,0,0,0.4);
             text-align: center;
             vertical-align: middle;
+            z-index: 200;
         }
 
         #about-dialog {
@@ -680,6 +685,7 @@
             background: rgba(0,0,0,0.4);
             text-align: center;
             vertical-align: middle;
+            z-index: 200;
         }
 
         #lang-dialog {
@@ -724,6 +730,86 @@
             font-weight: 700;
             color: #2C8CFF;
         }
+
+        /* Dark theme */
+        html.darktheme body { background: #1a1a2e; color: #E2E8F0; }
+        html.darktheme .app { background: #1a1a2e; }
+        html.darktheme .top-bar { background: #16213e; border-bottom-color: #2a2a4a; }
+        html.darktheme .brand-name { color: #E2E8F0; }
+        html.darktheme .card-device, html.darktheme .card-remote { background: #16213e; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+        html.darktheme .card-header { color: #94A3B8; border-bottom-color: #2a2a4a; }
+        html.darktheme .idbox { color: #E2E8F0; }
+        html.darktheme .passwordbox { color: #CBD5E1; }
+        html.darktheme .sessions-card { background: #16213e; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+        html.darktheme .sessions-bar { border-bottom-color: #2a2a4a; }
+        html.darktheme .sessions-tab span.active { color: #E2E8F0; background: #2a2a4a; }
+        html.darktheme .sessions-tab span.inactive { color: #64748B; }
+        html.darktheme .sessions-tab span.inactive:hover { color: #94A3B8; background: #2a2a4a; }
+        html.darktheme .session-item { background: #1a1a2e; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        html.darktheme .session-item:hover { outline-color: #475569; }
+        html.darktheme .session-name { color: #E2E8F0; }
+        html.darktheme .session-sub { color: #94A3B8; }
+        html.darktheme .session-menu:hover { background: #2a2a4a; color: #E2E8F0; }
+        html.darktheme .ua-section { border-top-color: #2a2a4a; }
+        html.darktheme input[type=text], html.darktheme input[type=password] { background: #1a1a2e; border-color: #475569; color: #E2E8F0; }
+        html.darktheme button.ua-set-btn { background: #2a2a4a; color: #CBD5E1; border-color: #475569; }
+        html.darktheme button.ua-set-btn:hover { background: #334155; }
+        html.darktheme #settings-panel { background: #16213e; }
+        html.darktheme .settings-header { border-bottom-color: #2a2a4a; }
+        html.darktheme .settings-title { color: #E2E8F0; }
+        html.darktheme .settings-close { color: #64748B; }
+        html.darktheme .settings-close:hover { color: #E2E8F0; }
+        html.darktheme .settings-section { border-bottom-color: #2a2a4a; }
+        html.darktheme .section-label { color: #64748B; }
+        html.darktheme .setting-name { color: #CBD5E1; }
+        html.darktheme .setting-row:hover { background: #1a1a2e; }
+        html.darktheme .toggle-switch { background: #475569; }
+        html.darktheme .toggle-switch.on { background: #2C8CFF; }
+        html.darktheme #pw-settings-dialog, html.darktheme #about-dialog, html.darktheme #lang-dialog { background: #16213e; }
+        html.darktheme .pw-dialog-title, html.darktheme .lang-dialog-title { color: #E2E8F0; }
+        html.darktheme .about-app-name { color: #E2E8F0; }
+        html.darktheme .about-version { color: #94A3B8; }
+        html.darktheme .lang-item { color: #CBD5E1; }
+        html.darktheme .lang-item:hover { background: #2a2a4a; }
+        html.darktheme .lang-dialog-title { border-bottom-color: #2a2a4a; }
+        html.darktheme button.outline { background: #1a1a2e; color: #2C8CFF; border-color: #2C8CFF; }
+        html.darktheme button.outline:hover { background: #16213e; }
+        html.darktheme #ctx-menu { background: #16213e; border-color: #475569; }
+        html.darktheme .ctx-item { color: #CBD5E1; }
+        html.darktheme .ctx-item:hover { background: #2a2a4a; }
+        html.darktheme .ctx-separator { background: #2a2a4a; }
+        html.darktheme .empty-state { color: #64748B; }
+        html.darktheme select { background: #1a1a2e; border-color: #475569; color: #E2E8F0; }
+
+        /* Dialog overlay classes */
+        .dialog-overlay { display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle; z-index:200; }
+        .dialog-box { width:300px; background:white; border-radius:12px; padding:20px; margin:* auto; box-shadow:0 4px 24px rgba(0,0,0,0.2); flow:vertical; border-spacing:10px; text-align:left; }
+        .dialog-box.wide { width:320px; }
+        .dialog-title { font-size:1em; font-weight:700; color:#1E293B; }
+        .dialog-fields { flow:vertical; border-spacing:6px; }
+        .dialog-label { font-size:0.75em; font-weight:600; color:#64748B; text-transform:uppercase; }
+        .dialog-input { width:*; border:1px solid #E2E8F0; border-radius:6px; padding:6px 8px; font-size:0.9em; }
+        .dialog-buttons { flow:horizontal; border-spacing:8px; }
+        .dialog-text { font-size:0.85em; color:#334155; }
+        .dialog-text-sm { font-size:0.8em; color:#94A3B8; }
+        .dialog-hint { font-size:0.85em; color:#334155; line-height:1.5; }
+        .dialog-mono { background:#F1F5F9; border-radius:6px; padding:8px; font-family:Consolas,monospace; font-size:0.8em; word-break:break-all; }
+        .dialog-error { font-size:0.75em; color:#EF4444; min-height:16px; }
+        .dialog-success { font-size:0.85em; color:#22C55E; font-weight:600; }
+
+        .net-option { padding:8px; border-radius:6px; border:1px solid #E2E8F0; cursor:pointer; }
+        .net-option.selected { border-color:#2C8CFF; background:#EBF5FF; }
+
+        html.darktheme .dialog-box { background: #16213e; }
+        html.darktheme .dialog-title { color: #E2E8F0; }
+        html.darktheme .dialog-label { color: #94A3B8; }
+        html.darktheme .dialog-input { background: #1a1a2e; border-color: #475569; color: #E2E8F0; }
+        html.darktheme .dialog-text { color: #CBD5E1; }
+        html.darktheme .dialog-text-sm { color: #64748B; }
+        html.darktheme .dialog-hint { color: #CBD5E1; }
+        html.darktheme .dialog-mono { background: #2a2a4a; color: #E2E8F0; }
+        html.darktheme .net-option { border-color: #475569; background: #1a1a2e; }
+        html.darktheme .net-option.selected { border-color: #2C8CFF; background: #1a3a5e; }
     </style>
     <script type="text/tiscript">
 
@@ -803,9 +889,11 @@ function applyTranslations() {
 }
 
 self.ready = function() {
-    initTranslations();
-    initLangList();
-    applyTranslations();
+    try { initTranslations(); } catch(e) { dbg("FAIL self.ready: initTranslations: " + e); }
+    try { initLangList(); bindLangItems(); } catch(e) { dbg("FAIL self.ready: initLangList: " + e); }
+    try { applyTranslations(); } catch(e) { dbg("FAIL self.ready: applyTranslations: " + e); }
+    try { initSettingsState(); } catch(e) { dbg("FAIL self.ready: initSettingsState: " + e); }
+    dbg("self.ready COMPLETE");
 };
 
     </script>
@@ -884,35 +972,89 @@ self.ready = function() {
                     <div class="section-label" data-tr="Remote Access">Remote Access</div>
                     <div class="setting-row" id="toggle-keyboard">
                         <span class="setting-name" data-tr="Keyboard/Mouse">Keyboard/Mouse</span>
-                        <div class="toggle-switch on" id="sw-keyboard"><div class="toggle-knob"></div></div>
+                        <div class="toggle-switch" id="sw-keyboard"><div class="toggle-knob"></div></div>
                     </div>
                     <div class="setting-row" id="toggle-clipboard">
                         <span class="setting-name" data-tr="Clipboard">Clipboard</span>
-                        <div class="toggle-switch on" id="sw-clipboard"><div class="toggle-knob"></div></div>
+                        <div class="toggle-switch" id="sw-clipboard"><div class="toggle-knob"></div></div>
                     </div>
                     <div class="setting-row" id="toggle-file">
                         <span class="setting-name" data-tr="File Transfer">File Transfer</span>
-                        <div class="toggle-switch on" id="sw-file"><div class="toggle-knob"></div></div>
+                        <div class="toggle-switch" id="sw-file"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="setting-row" id="toggle-remote-restart">
+                        <span class="setting-name" data-tr="Remote Restart">Remote Restart</span>
+                        <div class="toggle-switch" id="sw-remote-restart"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="setting-row" id="toggle-tunnel">
+                        <span class="setting-name" data-tr="TCP Tunneling">TCP Tunneling</span>
+                        <div class="toggle-switch" id="sw-tunnel"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="setting-row" id="toggle-remote-printing">
+                        <span class="setting-name" data-tr="Remote Printing">Remote Printing</span>
+                        <div class="toggle-switch" id="sw-remote-printing"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="setting-row" id="toggle-wol">
+                        <span class="setting-name" data-tr="Wake On LAN">Wake On LAN</span>
+                        <div class="toggle-switch" id="sw-wol"><div class="toggle-knob"></div></div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="section-label" data-tr="Network">Network</div>
+                    <div class="setting-row" id="action-choose-network">
+                        <span class="setting-name" data-tr="Choose Network">Choose Network</span>
+                        <span class="setting-arrow">&#x203A;</span>
+                    </div>
+                    <div class="setting-row" id="action-proxy">
+                        <span class="setting-name" data-tr="Proxy Settings">Proxy Settings</span>
+                        <span class="setting-arrow">&#x203A;</span>
+                    </div>
+                    <div class="setting-row" id="toggle-direct-server">
+                        <span class="setting-name" data-tr="Direct IP Access">Direct IP Access</span>
+                        <div class="toggle-switch" id="sw-direct-server"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="setting-row" id="toggle-lan-discovery">
+                        <span class="setting-name" data-tr="LAN Discovery">LAN Discovery</span>
+                        <div class="toggle-switch" id="sw-lan-discovery"><div class="toggle-knob"></div></div>
                     </div>
                 </div>
                 <div class="settings-section">
                     <div class="section-label" data-tr="Security">Security</div>
                     <div class="setting-row" id="action-password">
                         <span class="setting-name" data-tr="Permanent Password">Permanent Password</span>
-                        <span class="setting-arrow">></span>
+                        <span class="setting-arrow">&#x203A;</span>
+                    </div>
+                    <div class="setting-row" id="toggle-stop-service">
+                        <span class="setting-name" data-tr="Allow Incoming Connections">Allow Incoming Connections</span>
+                        <div class="toggle-switch" id="sw-stop-service"><div class="toggle-knob"></div></div>
+                    </div>
+                    <div class="setting-row" id="action-2fa">
+                        <span class="setting-name" data-tr="Two-Factor Authentication">Two-Factor Authentication</span>
+                        <span class="setting-value" id="2fa-display">Off</span>
                     </div>
                 </div>
                 <div class="settings-section">
-                    <div class="section-label" data-tr="Language">Language</div>
+                    <div class="section-label" data-tr="Appearance">Appearance</div>
+                    <div class="setting-row" id="toggle-darktheme">
+                        <span class="setting-name" data-tr="Dark Theme">Dark Theme</span>
+                        <div class="toggle-switch" id="sw-darktheme"><div class="toggle-knob"></div></div>
+                    </div>
                     <div class="setting-row" id="action-language">
-                        <span class="setting-name" id="current-lang-display">English</span>
-                        <span class="setting-arrow">></span>
+                        <span class="setting-name" data-tr="Language">Language</span>
+                        <span class="setting-value" id="current-lang-display">English</span>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="section-label" data-tr="Dashboard">Dashboard</div>
+                    <div class="setting-row" id="action-dashboard">
+                        <span class="setting-name" id="dashboard-display" data-tr="Enter Invite Code">Enter Invite Code</span>
+                        <span class="setting-arrow" id="dashboard-arrow">&#x203A;</span>
                     </div>
                 </div>
                 <div class="settings-section">
                     <div class="setting-row" id="action-about">
                         <span class="setting-name" data-tr="About HopToDesk">About HopToDesk</span>
-                        <span class="setting-arrow">></span>
+                        <span class="setting-arrow">&#x203A;</span>
                     </div>
                 </div>
             </div>
@@ -961,6 +1103,79 @@ self.ready = function() {
         </div>
     </div>
 
+    <div id="proxy-overlay" class="dialog-overlay">
+        <div class="dialog-box">
+            <div class="dialog-title" data-tr="Proxy Settings">Proxy Settings</div>
+            <div class="dialog-fields">
+                <div class="dialog-label" data-tr="Hostname">Hostname</div>
+                <input type="text" id="proxy-host" class="dialog-input" placeholder="e.g. 127.0.0.1:1080" />
+                <div class="dialog-label" data-tr="Username">Username</div>
+                <input type="text" id="proxy-user" class="dialog-input" />
+                <div class="dialog-label" data-tr="Password">Password</div>
+                <input type="password" id="proxy-pass" class="dialog-input" />
+                <div class="dialog-label" data-tr="Type">Type</div>
+                <select id="proxy-type" class="dialog-input">
+                    <option value="auto">Auto</option>
+                    <option value="socks5">SOCKS5</option>
+                    <option value="http">HTTP</option>
+                </select>
+            </div>
+            <div class="dialog-buttons">
+                <button class="button outline" id="proxy-cancel" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Cancel">Cancel</button>
+                <button class="button" id="proxy-save" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="network-overlay" class="dialog-overlay">
+        <div class="dialog-box">
+            <div class="dialog-title" data-tr="Choose Network">Choose Network</div>
+            <div style="flow:vertical; border-spacing:8px;">
+                <div class="net-option selected" id="net-default">
+                    <span class="setting-name" data-tr="HopToDesk Network (Default)">HopToDesk Network (Default)</span>
+                </div>
+                <div class="net-option" id="net-custom">
+                    <span class="setting-name" data-tr="Custom">Custom</span>
+                </div>
+                <input type="text" id="net-custom-url" class="dialog-input" style="display:none;" placeholder="https://custom-server.example.com" />
+            </div>
+            <div class="dialog-buttons">
+                <button class="button outline" id="network-cancel" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Cancel">Cancel</button>
+                <button class="button" id="network-save" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tfa-overlay" class="dialog-overlay">
+        <div class="dialog-box wide">
+            <div class="dialog-title" data-tr="Two-Factor Authentication">Two-Factor Authentication</div>
+            <div id="tfa-content"></div>
+        </div>
+    </div>
+
+    <div id="dashboard-overlay" class="dialog-overlay">
+        <div class="dialog-box wide">
+            <div class="dialog-title" data-tr="Dashboard">Dashboard</div>
+            <div id="dashboard-content"></div>
+        </div>
+    </div>
+
+    <div id="wol-info-overlay" class="dialog-overlay">
+        <div class="dialog-box wide">
+            <div class="dialog-title" data-tr="Wake On LAN">Wake On LAN</div>
+            <div class="dialog-hint">
+                <div style="margin-bottom:6px;">Wake On LAN lets you power on this device remotely from another HopToDesk client or the dashboard.</div>
+                <div style="font-weight:700; margin-bottom:4px;">Requirements:</div>
+                <div style="padding-left:8px;">&#x2022; This device must be connected via Ethernet (not WiFi)</div>
+                <div style="padding-left:8px;">&#x2022; WoL must be enabled in the device's BIOS/UEFI settings</div>
+                <div style="padding-left:8px;">&#x2022; The network adapter must have WoL enabled in OS settings</div>
+                <div style="padding-left:8px; margin-bottom:8px;">&#x2022; Another HopToDesk device on the same network must be online to relay the wake signal</div>
+                <div class="dialog-text-sm">The wake signal is sent by another online HopToDesk device on the same local network.</div>
+            </div>
+            <button class="button" id="wol-info-close" style="width:80px; height:2em; border-radius:6px; font-size:0.85em; margin:0 auto;" data-tr="OK">OK</button>
+        </div>
+    </div>
+
     <div id="ctx-menu-overlay">
         <div id="ctx-menu">
             <div class="ctx-item" id="ctx-connect" data-tr="Connect">Connect</div>
@@ -977,7 +1192,7 @@ self.ready = function() {
         </div>
     </div>
 
-    <div id="rename-overlay" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle;">
+    <div id="rename-overlay" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle; z-index:200;">
         <div style="width:260px; background:white; border-radius:10px; padding:16px; margin:* auto; flow:vertical; border-spacing:8px;">
             <div style="font-size:0.9em; font-weight:700; color:#1E293B;" data-tr="Rename Peer">Rename Peer</div>
             <input type="text" id="rename-input" style="width:*; border:1px solid #E2E8F0; border-radius:6px; padding:6px 8px; font-size:0.85em;" data-tr-placeholder="Enter alias" placeholder="Enter alias" />
@@ -988,7 +1203,7 @@ self.ready = function() {
         </div>
     </div>
 
-    <div id="mac-overlay" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle;">
+    <div id="mac-overlay" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle; z-index:200;">
         <div style="width:280px; background:white; border-radius:10px; padding:16px; margin:* auto; flow:vertical; border-spacing:8px;">
             <div style="font-size:0.9em; font-weight:700; color:#1E293B;">Set MAC Address for WOL</div>
             <input type="text" id="mac-input" style="width:*; border:1px solid #E2E8F0; border-radius:6px; padding:6px 8px; font-size:0.85em;" placeholder="AA:BB:CC:DD:EE:FF" />
@@ -1009,6 +1224,7 @@ self.ready = function() {
     <div id="set-perm-pw-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="set-option-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="open-url-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="open-ticket-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="set-lang-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="langs-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="tr-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
@@ -1017,8 +1233,32 @@ self.ready = function() {
     <div id="ctx-menu-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="wol-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="set-mac-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="set-proxy-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="proxy-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="2fa-generate-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="2fa-verify-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="2fa-verify-result" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="2fa-disable-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="2fa-url-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="2fa-qr-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="2fa-status" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="options-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="set-custom-api-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="set-invite-code-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+
+    <!-- Debug log panel (hidden — change display:none to display:block to enable) -->
+    <div id="debug-log" style="display:none; position:fixed; bottom:0; left:0; right:0; height:100px; background:#111; color:#0f0; font-family:Consolas,monospace; font-size:11px; overflow-y:scroll; padding:4px 8px; z-index:99999;"></div>
 
     <script type="text/tiscript">
+
+        function dbg(msg) {
+            try {
+                var el = $(#debug-log);
+                if (el) el.text = el.text + msg + "\n";
+            } catch(e) {}
+        }
+
+        dbg("script2 start");
 
         function openPwSettings() {
             $(#perm-pw1).value = "";
@@ -1029,6 +1269,7 @@ self.ready = function() {
         }
 
         function openSettings() {
+            refreshSettingsState();
             $(#settings-overlay).style#display = "block";
         }
 
@@ -1044,103 +1285,479 @@ self.ready = function() {
             }
         }
 
-        $(#ua-set-btn).onClick = function() { openPwSettings(); };
+        function getOptions() {
+            var el = $(#options-data);
+            if (!el) return {};
+            var raw = el.text;
+            if (!raw || raw.length < 3) return {};
+            try { return JSON.parse(raw); } catch(e) { return {}; }
+        }
 
-        $(#sw-ua).onClick = function() {
+        // Default-ON options: enabled unless explicitly "N"
+        function isDefaultOn(opts, key) {
+            return opts[key] !== "N";
+        }
+        // Default-OFF options: enabled only if "Y"
+        function isDefaultOff(opts, key) {
+            return opts[key] === "Y";
+        }
+
+        function initSettingsState() {
+            var opts = getOptions();
+            // Default-ON toggles
+            updateToggle($(#sw-keyboard), isDefaultOn(opts, "enable-keyboard"));
+            updateToggle($(#sw-clipboard), isDefaultOn(opts, "enable-clipboard"));
+            updateToggle($(#sw-file), isDefaultOn(opts, "enable-file-transfer"));
+            updateToggle($(#sw-remote-restart), isDefaultOn(opts, "enable-remote-restart"));
+            updateToggle($(#sw-tunnel), isDefaultOn(opts, "enable-tunnel"));
+            updateToggle($(#sw-lan-discovery), isDefaultOn(opts, "enable-lan-discovery"));
+            // Default-OFF toggles
+            updateToggle($(#sw-remote-printing), isDefaultOff(opts, "enable-remote-printing"));
+            updateToggle($(#sw-wol), isDefaultOff(opts, "enable-wol"));
+            updateToggle($(#sw-direct-server), isDefaultOff(opts, "direct-server"));
+            // Inverted: Allow Incoming = ON when stop-service is NOT "Y"
+            updateToggle($(#sw-stop-service), opts["stop-service"] !== "Y");
+            // Dark theme
+            var darkOn = opts["allow-darktheme"] === "Y";
+            updateToggle($(#sw-darktheme), darkOn);
+            applyDarkTheme(darkOn);
+            // Dashboard
+            updateDashboardDisplay(opts["dashboard_user_id"] || "");
+            // 2FA display
+            var tfaOn = $(#2fa-status) && $(#2fa-status).text === "on";
+            $(#2fa-display).text = tfaOn ? tr("On") : tr("Off");
+        }
+
+        function refreshSettingsState() {
+            var opts = getOptions();
+            updateToggle($(#sw-keyboard), isDefaultOn(opts, "enable-keyboard"));
+            updateToggle($(#sw-clipboard), isDefaultOn(opts, "enable-clipboard"));
+            updateToggle($(#sw-file), isDefaultOn(opts, "enable-file-transfer"));
+            updateToggle($(#sw-remote-restart), isDefaultOn(opts, "enable-remote-restart"));
+            updateToggle($(#sw-tunnel), isDefaultOn(opts, "enable-tunnel"));
+            updateToggle($(#sw-lan-discovery), isDefaultOn(opts, "enable-lan-discovery"));
+            updateToggle($(#sw-remote-printing), isDefaultOff(opts, "enable-remote-printing"));
+            updateToggle($(#sw-wol), isDefaultOff(opts, "enable-wol"));
+            updateToggle($(#sw-direct-server), isDefaultOff(opts, "direct-server"));
+            updateToggle($(#sw-stop-service), opts["stop-service"] !== "Y");
+            updateToggle($(#sw-darktheme), opts["allow-darktheme"] === "Y");
+            updateDashboardDisplay(opts["dashboard_user_id"] || "");
+            var tfaOn = $(#2fa-status) && $(#2fa-status).text === "on";
+            $(#2fa-display).text = tfaOn ? tr("On") : tr("Off");
+        }
+
+        function updateDashboardDisplay(dashId) {
+            if (dashId && dashId.length > 0) {
+                $(#dashboard-display).text = tr("Linked");
+                $(#dashboard-arrow).text = dashId.substr(0, 10) + "..";
+                $(#dashboard-arrow).style#color = "#94A3B8";
+                $(#dashboard-arrow).style#font-size = "0.75em";
+            } else {
+                $(#dashboard-display).text = tr("Enter Invite Code");
+                $(#dashboard-arrow).text = "\u203A";
+                $(#dashboard-arrow).style#color = "#CBD5E1";
+                $(#dashboard-arrow).style#font-size = "1.2em";
+            }
+        }
+
+        function applyDarkTheme(on) {
+            var html = $(html);
+            if (on) {
+                html.attributes.addClass("darktheme");
+            } else {
+                html.attributes.removeClass("darktheme");
+            }
+        }
+
+        function setOptionAndUpdate(key, value) {
+            $(#set-option-flag).text = key + "|" + value;
+            // Update local options-data cache
+            var opts = getOptions();
+            opts[key] = value;
+            try { $(#options-data).text = JSON.stringify(opts); } catch(e) {}
+        }
+
+        try { $(#ua-set-btn).onClick = function() { openPwSettings(); }; dbg("OK: ua-set-btn"); } catch(e) { dbg("FAIL: ua-set-btn: " + e); }
+
+        try { $(#sw-ua).onClick = function() {
             var sw = $(#sw-ua);
             var isOn = sw.attributes.hasClass("on");
             updateToggle(sw, !isOn);
             $(#set-option-flag).text = "unattended-access|" + (!isOn ? "Y" : "N");
-        };
-        $(#settings-gear).onClick = function() { openSettings(); };
-        $(#settings-close).onClick = function() { closeSettings(); };
-        $(#settings-backdrop).onClick = function() { closeSettings(); };
+        }; dbg("OK: sw-ua"); } catch(e) { dbg("FAIL: sw-ua: " + e); }
 
-        $(#toggle-keyboard).onClick = function() {
-            var sw = $(#sw-keyboard);
-            var isOn = sw.attributes.hasClass("on");
-            updateToggle(sw, !isOn);
-            $(#set-option-flag).text = "enable-keyboard|" + (!isOn ? "Y" : "N");
-        };
+        try { $(#settings-gear).onClick = function() { openSettings(); }; dbg("OK: settings-gear"); } catch(e) { dbg("FAIL: settings-gear: " + e); }
+        try { $(#settings-close).onClick = function() { closeSettings(); }; dbg("OK: settings-close"); } catch(e) { dbg("FAIL: settings-close: " + e); }
+        try { $(#settings-backdrop).onClick = function() { closeSettings(); }; dbg("OK: settings-backdrop"); } catch(e) { dbg("FAIL: settings-backdrop: " + e); }
 
-        $(#toggle-clipboard).onClick = function() {
-            var sw = $(#sw-clipboard);
-            var isOn = sw.attributes.hasClass("on");
-            updateToggle(sw, !isOn);
-            $(#set-option-flag).text = "enable-clipboard|" + (!isOn ? "Y" : "N");
-        };
-
-        $(#toggle-file).onClick = function() {
-            var sw = $(#sw-file);
-            var isOn = sw.attributes.hasClass("on");
-            updateToggle(sw, !isOn);
-            $(#set-option-flag).text = "enable-file-transfer|" + (!isOn ? "Y" : "N");
-        };
-
-        $(#action-password).onClick = function() {
-            closeSettings();
-            openPwSettings();
-        };
-
-        $(#action-language).onClick = function() {
-            closeSettings();
-            initLangList();
-            $(#lang-overlay).style#display = "block";
-        };
-
-        $(#action-about).onClick = function() {
-            closeSettings();
-            $(#about-overlay).style#display = "block";
-        };
-
-        event click $(#about-close) {
-            $(#about-overlay).style#display = "none";
+        // --- Toggle handlers (default-ON options: Y/N) ---
+        function makeDefaultOnToggle(rowId, swId, optionKey) {
+            try {
+                var row = self.select(rowId);
+                if (!row) { dbg("FAIL: makeDefaultOnToggle " + rowId + " — element not found"); return; }
+                row.onClick = function() {
+                    var sw = self.select(swId);
+                    var isOn = sw.attributes.hasClass("on");
+                    updateToggle(sw, !isOn);
+                    setOptionAndUpdate(optionKey, !isOn ? "" : "N");
+                };
+                dbg("OK: toggle " + rowId);
+            } catch(e) { dbg("FAIL: toggle " + rowId + ": " + e); }
         }
 
-        // Language dialog
-        event click $(#lang-overlay) (evt) {
+        makeDefaultOnToggle("#toggle-keyboard", "#sw-keyboard", "enable-keyboard");
+        makeDefaultOnToggle("#toggle-clipboard", "#sw-clipboard", "enable-clipboard");
+        makeDefaultOnToggle("#toggle-file", "#sw-file", "enable-file-transfer");
+        makeDefaultOnToggle("#toggle-remote-restart", "#sw-remote-restart", "enable-remote-restart");
+        makeDefaultOnToggle("#toggle-tunnel", "#sw-tunnel", "enable-tunnel");
+        makeDefaultOnToggle("#toggle-lan-discovery", "#sw-lan-discovery", "enable-lan-discovery");
+
+        // --- Toggle handlers (default-OFF options: Y/N) ---
+        function makeDefaultOffToggle(rowId, swId, optionKey) {
+            try {
+                var row = self.select(rowId);
+                if (!row) { dbg("FAIL: makeDefaultOffToggle " + rowId + " — element not found"); return; }
+                row.onClick = function() {
+                    var sw = self.select(swId);
+                    var isOn = sw.attributes.hasClass("on");
+                    updateToggle(sw, !isOn);
+                    setOptionAndUpdate(optionKey, !isOn ? "Y" : "N");
+                };
+                dbg("OK: toggle " + rowId);
+            } catch(e) { dbg("FAIL: toggle " + rowId + ": " + e); }
+        }
+
+        makeDefaultOffToggle("#toggle-remote-printing", "#sw-remote-printing", "enable-remote-printing");
+        makeDefaultOffToggle("#toggle-direct-server", "#sw-direct-server", "direct-server");
+
+        // WOL toggle with instructions popup
+        try { $(#toggle-wol).onClick = function() {
+            var sw = $(#sw-wol);
+            var isOn = sw.attributes.hasClass("on");
+            updateToggle(sw, !isOn);
+            setOptionAndUpdate("enable-wol", !isOn ? "Y" : "N");
+            $(#set-option-flag).text = "wol-enabled|" + (!isOn ? "true" : "");
+            if (!isOn) {
+                closeSettings();
+                $(#wol-info-overlay).style#display = "block";
+            }
+        }; dbg("OK: toggle-wol"); } catch(e) { dbg("FAIL: toggle-wol: " + e); }
+
+        // Stop-service (inverted: toggle ON = stop-service empty, toggle OFF = stop-service Y)
+        try { $(#toggle-stop-service).onClick = function() {
+            var sw = $(#sw-stop-service);
+            var isOn = sw.attributes.hasClass("on");
+            updateToggle(sw, !isOn);
+            setOptionAndUpdate("stop-service", !isOn ? "" : "Y");
+        }; dbg("OK: toggle-stop-service"); } catch(e) { dbg("FAIL: toggle-stop-service: " + e); }
+
+        // Dark theme toggle
+        try { $(#toggle-darktheme).onClick = function() {
+            var sw = $(#sw-darktheme);
+            var isOn = sw.attributes.hasClass("on");
+            updateToggle(sw, !isOn);
+            setOptionAndUpdate("allow-darktheme", !isOn ? "Y" : "");
+            applyDarkTheme(!isOn);
+        }; dbg("OK: toggle-darktheme"); } catch(e) { dbg("FAIL: toggle-darktheme: " + e); }
+
+        // --- Action handlers ---
+        try { $(#action-password).onClick = function() {
+            closeSettings();
+            openPwSettings();
+        }; dbg("OK: action-password"); } catch(e) { dbg("FAIL: action-password: " + e); }
+
+        try { $(#action-language).onClick = function() {
+            closeSettings();
+            initLangList();
+            bindLangItems();
+            $(#lang-overlay).style#display = "block";
+        }; dbg("OK: action-language"); } catch(e) { dbg("FAIL: action-language: " + e); }
+
+        try { $(#action-about).onClick = function() {
+            closeSettings();
+            $(#about-overlay).style#display = "block";
+        }; dbg("OK: action-about"); } catch(e) { dbg("FAIL: action-about: " + e); }
+
+        try { $(#action-proxy).onClick = function() {
+            closeSettings();
+            var pd = {};
+            try { pd = JSON.parse($(#proxy-data).text || "{}"); } catch(e) {}
+            $(#proxy-host).value = pd.proxy || "";
+            $(#proxy-user).value = pd.username || "";
+            $(#proxy-pass).value = pd.password || "";
+            var sel = $(#proxy-type);
+            var pt = pd.proxy_type || "auto";
+            sel.value = pt;
+            $(#proxy-overlay).style#display = "block";
+        }; dbg("OK: action-proxy"); } catch(e) { dbg("FAIL: action-proxy: " + e); }
+
+        try { $(#action-choose-network).onClick = function() {
+            closeSettings();
+            var opts = getOptions();
+            var customUrl = opts["custom-rendezvous-server"] || "";
+            if (customUrl) {
+                $(#net-default).attributes.removeClass("selected");
+                $(#net-custom).attributes.addClass("selected");
+                $(#net-custom-url).style#display = "block";
+                $(#net-custom-url).value = customUrl;
+            } else {
+                $(#net-default).attributes.addClass("selected");
+                $(#net-custom).attributes.removeClass("selected");
+                $(#net-custom-url).style#display = "none";
+                $(#net-custom-url).value = "";
+            }
+            $(#network-overlay).style#display = "block";
+        }; dbg("OK: action-choose-network"); } catch(e) { dbg("FAIL: action-choose-network: " + e); }
+
+        try { $(#action-2fa).onClick = function() {
+            closeSettings();
+            show2FADialog();
+        }; dbg("OK: action-2fa"); } catch(e) { dbg("FAIL: action-2fa: " + e); }
+
+        try { $(#action-dashboard).onClick = function() {
+            closeSettings();
+            showDashboardDialog();
+        }; dbg("OK: action-dashboard"); } catch(e) { dbg("FAIL: action-dashboard: " + e); }
+
+        // --- WOL info close ---
+        try { $(#wol-info-close).onClick = function() {
+            $(#wol-info-overlay).style#display = "none";
+        }; dbg("OK: wol-info-close"); } catch(e) { dbg("FAIL: wol-info-close: " + e); }
+
+        // --- Proxy dialog ---
+        try { $(#proxy-cancel).onClick = function() { $(#proxy-overlay).style#display = "none"; }; dbg("OK: proxy-cancel"); } catch(e) { dbg("FAIL: proxy-cancel: " + e); }
+        try { $(#proxy-save).onClick = function() {
+            var data = JSON.stringify({
+                proxy: $(#proxy-host).value || "",
+                username: $(#proxy-user).value || "",
+                password: $(#proxy-pass).value || "",
+                proxy_type: $(#proxy-type).value || "auto"
+            });
+            $(#set-proxy-flag).text = data;
+            $(#proxy-data).text = data;
+            $(#proxy-overlay).style#display = "none";
+        }; dbg("OK: proxy-save"); } catch(e) { dbg("FAIL: proxy-save: " + e); }
+
+        // --- Network dialog ---
+        try { $(#net-default).onClick = function() {
+            $(#net-default).attributes.addClass("selected");
+            $(#net-custom).attributes.removeClass("selected");
+            $(#net-custom-url).style#display = "none";
+        }; dbg("OK: net-default"); } catch(e) { dbg("FAIL: net-default: " + e); }
+        try { $(#net-custom).onClick = function() {
+            $(#net-custom).attributes.addClass("selected");
+            $(#net-default).attributes.removeClass("selected");
+            $(#net-custom-url).style#display = "block";
+            $(#net-custom-url).state.focus = true;
+        }; dbg("OK: net-custom"); } catch(e) { dbg("FAIL: net-custom: " + e); }
+        try { $(#network-cancel).onClick = function() { $(#network-overlay).style#display = "none"; }; dbg("OK: network-cancel"); } catch(e) { dbg("FAIL: network-cancel: " + e); }
+        try { $(#network-save).onClick = function() {
+            var isCustom = $(#net-custom).attributes.hasClass("selected");
+            var url = isCustom ? ($(#net-custom-url).value || "") : "";
+            $(#set-custom-api-flag).text = url;
+            setOptionAndUpdate("custom-rendezvous-server", url);
+            $(#network-overlay).style#display = "none";
+        }; dbg("OK: network-save"); } catch(e) { dbg("FAIL: network-save: " + e); }
+
+        // --- 2FA dialog ---
+        // NOTE: All button handlers are attached via .onClick AFTER creating
+        // dynamic elements. Using "event click $(#id)" for non-existent elements
+        // crashes old XP Sciter and kills all subsequent handler registrations.
+
+        function bind2faCloseBtn() {
+            var btn = $(#tfa-close-btn);
+            if (btn) btn.onClick = function() { $(#tfa-overlay).style#display = "none"; };
+        }
+
+        function bind2faVerifyBtn() {
+            var btn = $(#tfa-verify-btn);
+            if (!btn) return;
+            btn.onClick = function() {
+                var code = ($(#tfa-code-input).value || "").replace(/ /g, "");
+                if (code.length != 6) {
+                    $(#tfa-verify-error).text = tr("Enter your 6-digit code");
+                    return;
+                }
+                $(#2fa-verify-result).text = "";
+                $(#2fa-verify-flag).text = code;
+                var verifyCount = 0;
+                var overlay = $(#tfa-overlay);
+                function checkVerify() {
+                    verifyCount++;
+                    var result = $(#2fa-verify-result).text || "";
+                    if (result === "ok") {
+                        $(#2fa-display).text = tr("On");
+                        $(#tfa-overlay).style#display = "none";
+                    } else if (result === "fail") {
+                        $(#tfa-verify-error).text = tr("Invalid code, please try again");
+                    } else if (verifyCount > 50) {
+                        $(#tfa-verify-error).text = tr("Verification timed out. Please try again.");
+                    } else {
+                        overlay.timer(200, checkVerify);
+                    }
+                }
+                overlay.timer(200, checkVerify);
+            };
+        }
+
+        function show2FADialog() {
+            var isOn = $(#2fa-status) && $(#2fa-status).text === "on";
+            var content = $(#tfa-content);
+            if (isOn) {
+                content.html = "<div class='dialog-success' style='margin-bottom:8px;'>" + tr("Two-Factor Authentication") + ": " + tr("On") + "</div>" +
+                    "<button class='button outline' id='tfa-disable-btn' style='width:*; height:2em; border-radius:6px; font-size:0.85em; color:#EF4444; border-color:#EF4444;'>" + tr("Disable") + "</button>" +
+                    "<div style='height:4px;'></div>" +
+                    "<button class='button outline' id='tfa-close-btn' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Cancel") + "</button>";
+                bind2faCloseBtn();
+                var disBtn = $(#tfa-disable-btn);
+                if (disBtn) disBtn.onClick = function() {
+                    $(#2fa-disable-flag).text = "1";
+                    $(#2fa-display).text = tr("Off");
+                    $(#tfa-overlay).style#display = "none";
+                };
+            } else {
+                content.html = "<div class='dialog-text' style='margin-bottom:8px;'>" + tr("Two-Factor Authentication") + ": " + tr("Off") + "</div>" +
+                    "<button class='button' id='tfa-enable-btn' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Enable") + "</button>" +
+                    "<div style='height:4px;'></div>" +
+                    "<button class='button outline' id='tfa-close-btn' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Cancel") + "</button>";
+                bind2faCloseBtn();
+                var enBtn = $(#tfa-enable-btn);
+                if (enBtn) enBtn.onClick = function() {
+                    $(#2fa-generate-flag).text = "1";
+                    $(#2fa-url-data).text = "";
+                    $(#2fa-qr-data).text = "";
+                    var content = $(#tfa-content);
+                    content.html = "<div class='dialog-text' style='margin-bottom:8px;'>Generating...</div>";
+                    var pollCount = 0;
+                    var overlay = $(#tfa-overlay);
+                    function check2faUrl() {
+                        pollCount++;
+                        var url = $(#2fa-url-data).text || "";
+                        if (url) {
+                            var secret = url;
+                            var si = url.indexOf("secret=");
+                            if (si >= 0) {
+                                secret = url.substr(si + 7);
+                                var ai = secret.indexOf("&");
+                                if (ai >= 0) secret = secret.substr(0, ai);
+                            }
+                            var qrSrc = $(#2fa-qr-data).text || "";
+                            var qrHtml = "";
+                            if (qrSrc) {
+                                qrHtml = "<center><img style='width:160px; height:160px; margin-bottom:8px; image-rendering:pixelated;' src='" + qrSrc + "' /></center>";
+                            }
+                            content.html = "<div class='dialog-text' style='font-size:0.8em; margin-bottom:8px;'>" + tr("Scan this QR code or enter the secret manually in your authenticator app:") + "</div>" +
+                                qrHtml +
+                                "<div class='dialog-mono' style='margin-bottom:8px; font-size:0.7em;'>" + secret + "</div>" +
+                                "<div class='dialog-label' style='margin-bottom:4px;'>" + tr("Enter your 6-digit code") + "</div>" +
+                                "<input type='text' id='tfa-code-input' class='dialog-input' style='letter-spacing:4px; text-align:center;' maxlength='6' placeholder='000000' />" +
+                                "<div class='dialog-error' id='tfa-verify-error'></div>" +
+                                "<button class='button' id='tfa-verify-btn' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Verify") + "</button>" +
+                                "<div style='height:4px;'></div>" +
+                                "<button class='button outline' id='tfa-close-btn' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Cancel") + "</button>";
+                            bind2faCloseBtn();
+                            bind2faVerifyBtn();
+                        } else if (pollCount > 75) {
+                            content.html = "<div class='dialog-text' style='margin-bottom:8px;'>" + tr("Failed to generate 2FA secret. Please try again.") + "</div>" +
+                                "<button class='button outline' id='tfa-close-btn' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Close") + "</button>";
+                            bind2faCloseBtn();
+                        } else {
+                            overlay.timer(200, check2faUrl);
+                        }
+                    }
+                    overlay.timer(200, check2faUrl);
+                };
+            }
+            $(#tfa-overlay).style#display = "block";
+        }
+
+        // --- Dashboard dialog ---
+        function showDashboardDialog() {
+            var opts = getOptions();
+            var dashId = opts["dashboard_user_id"] || "";
+            var content = $(#dashboard-content);
+            if (dashId) {
+                content.html = "<div class='dialog-text' style='margin-bottom:4px;'>" + tr("This device is linked to a dashboard.") + "</div>" +
+                    "<div class='dialog-mono' style='margin-bottom:8px;'>" + dashId + "</div>" +
+                    "<div class='dialog-text-sm' style='margin-bottom:4px;'>To change, enter a new invite code:</div>" +
+                    "<input type='text' id='dash-invite-input' class='dialog-input' maxlength='16' placeholder='16-character invite code' />" +
+                    "<div class='dialog-error' id='dash-error'></div>" +
+                    "<div class='dialog-buttons'>" +
+                    "<button class='button outline' id='dash-cancel' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Cancel") + "</button>" +
+                    "<button class='button' id='dash-save' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Save") + "</button>" +
+                    "</div>";
+            } else {
+                content.html = "<div class='dialog-text' style='margin-bottom:8px;'>" + tr("Enter your invite code to link this device to a dashboard.") + "</div>" +
+                    "<input type='text' id='dash-invite-input' class='dialog-input' maxlength='16' placeholder='16-character invite code' />" +
+                    "<div class='dialog-error' id='dash-error'></div>" +
+                    "<div class='dialog-buttons'>" +
+                    "<button class='button outline' id='dash-cancel' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Cancel") + "</button>" +
+                    "<button class='button' id='dash-save' style='width:*; height:2em; border-radius:6px; font-size:0.85em;'>" + tr("Save") + "</button>" +
+                    "</div>";
+            }
+            // Bind handlers after creating elements
+            var cancelBtn = $(#dash-cancel);
+            if (cancelBtn) cancelBtn.onClick = function() { $(#dashboard-overlay).style#display = "none"; };
+            var saveBtn = $(#dash-save);
+            if (saveBtn) saveBtn.onClick = function() {
+                var code = ($(#dash-invite-input).value || "").replace(/ /g, "");
+                if (code.length == 0) return;
+                if (!validateInviteCode(code)) {
+                    $(#dash-error).text = tr("Invalid invite code. Must be 16 characters (letters and numbers).");
+                    return;
+                }
+                $(#set-invite-code-flag).text = code;
+                setOptionAndUpdate("dashboard_user_id", "pending...");
+                updateDashboardDisplay("pending...");
+                $(#dashboard-overlay).style#display = "none";
+            };
+            $(#dashboard-overlay).style#display = "block";
+        }
+
+        function validateInviteCode(code) {
+            if (code.length != 16) return false;
+            var hasUpper = false;
+            for (var i = 0; i < code.length; i++) {
+                var c = code.charAt(i);
+                if (c >= "A" && c <= "Z") hasUpper = true;
+                else if (c >= "a" && c <= "z") {}
+                else if (c >= "0" && c <= "9") {}
+                else return false;
+            }
+            return hasUpper;
+        }
+
+        try { $(#about-close).onClick = function() {
+            $(#about-overlay).style#display = "none";
+        }; dbg("OK: about-close"); } catch(e) { dbg("FAIL: about-close: " + e); }
+
+        // Language dialog — close on backdrop click
+        try { $(#lang-overlay).onClick = function(evt) {
             if (evt.target === $(#lang-overlay)) {
                 $(#lang-overlay).style#display = "none";
             }
-        }
+        }; dbg("OK: lang-overlay"); } catch(e) { dbg("FAIL: lang-overlay: " + e); }
 
-        event click $(.lang-item) (evt, el) {
-            var code = el.attributes["data-code"];
-            if (!code) return;
-
-            for (var item in $$(#lang-list .lang-item)) {
-                item.attributes.removeClass("selected");
-            }
-            el.attributes.addClass("selected");
-
-            $(#current-lang-code).text = code;
-            $(#set-lang-flag).text = code;
-            $(#current-lang-display).text = el.text;
-
-            $(#lang-overlay).style#display = "none";
-        }
-
-        $(#link-website).onClick = function() {
+        try { $(#link-website).onClick = function() {
             $(#open-url-flag).text = "https://www.hoptodesk.com";
-        };
+        }; dbg("OK: link-website"); } catch(e) { dbg("FAIL: link-website: " + e); }
 
-        $(#link-privacy).onClick = function() {
+        try { $(#link-privacy).onClick = function() {
             $(#open-url-flag).text = "https://www.hoptodesk.com/privacy";
-        };
+        }; dbg("OK: link-privacy"); } catch(e) { dbg("FAIL: link-privacy: " + e); }
 
-        $(#link-agpl).onClick = function() {
+        try { $(#link-agpl).onClick = function() {
             $(#open-url-flag).text = "https://www.gnu.org/licenses/agpl-3.0.en.html";
-        };
+        }; dbg("OK: link-agpl"); } catch(e) { dbg("FAIL: link-agpl: " + e); }
 
-        $(#link-source).onClick = function() {
+        try { $(#link-source).onClick = function() {
             $(#open-url-flag).text = "https://gitlab.com/hoptodesk/hoptodesk/";
-        };
+        }; dbg("OK: link-source"); } catch(e) { dbg("FAIL: link-source: " + e); }
 
-        event click $(#pw-settings-save) {
+        try { $(#pw-settings-save).onClick = function() {
             var pw1 = $(#perm-pw1).value || "";
             var pw2 = $(#perm-pw2).value || "";
             if (pw1.length == 0 && pw2.length == 0) {
-
                 $(#set-perm-pw-flag).text = "__CLEAR__";
                 $(#pw-settings-overlay).style#display = "none";
                 return;
@@ -1155,40 +1772,49 @@ self.ready = function() {
             }
             $(#set-perm-pw-flag).text = pw1;
             $(#pw-settings-overlay).style#display = "none";
-        }
+        }; dbg("OK: pw-settings-save"); } catch(e) { dbg("FAIL: pw-settings-save: " + e); }
 
-        event click $(#pw-settings-cancel) {
+        try { $(#pw-settings-cancel).onClick = function() {
             $(#pw-settings-overlay).style#display = "none";
-        }
+        }; dbg("OK: pw-settings-cancel"); } catch(e) { dbg("FAIL: pw-settings-cancel: " + e); }
 
-        event click $(button#connect) {
+        try { $(button#connect).onClick = function() {
             var id = ($(#remote-id).value || "").replace(/ /g, "");
             if (!id) return;
             $(#connect-target).text = id;
-        }
+        }; dbg("OK: connect"); } catch(e) { dbg("FAIL: connect: " + e); }
 
-        event click $(button#file-transfer) {
+        try { $(#remote-id).onKey = function(evt) {
+            if (evt.keyCode == Event.VK_RETURN) {
+                var id = (this.value || "").replace(/ /g, "");
+                if (id) $(#connect-target).text = id;
+                return true;
+            }
+        }; dbg("OK: remote-id-enter"); } catch(e) { dbg("FAIL: remote-id-enter: " + e); }
+
+        try { $(button#file-transfer).onClick = function() {
             var id = ($(#remote-id).value || "").replace(/ /g, "");
             if (!id) return;
             $(#ft-target).text = id;
-        }
+        }; dbg("OK: file-transfer"); } catch(e) { dbg("FAIL: file-transfer: " + e); }
 
-        event click $(#tab-recent) {
+        try { $(#tab-recent).onClick = function() {
             $(#tab-recent).attributes.addClass("active");
             $(#tab-recent).attributes.removeClass("inactive");
             $(#tab-fav).attributes.addClass("inactive");
             $(#tab-fav).attributes.removeClass("active");
             $(#tab-switch-flag).text = "recent";
-        }
+        }; dbg("OK: tab-recent"); } catch(e) { dbg("FAIL: tab-recent: " + e); }
 
-        event click $(#tab-fav) {
+        try { $(#tab-fav).onClick = function() {
             $(#tab-fav).attributes.addClass("active");
             $(#tab-fav).attributes.removeClass("inactive");
             $(#tab-recent).attributes.addClass("inactive");
             $(#tab-recent).attributes.removeClass("active");
             $(#tab-switch-flag).text = "fav";
-        }
+        }; dbg("OK: tab-fav"); } catch(e) { dbg("FAIL: tab-fav: " + e); }
 
+        // Session items and 3-dot menu use event delegation (class selectors, elements exist)
         event click $(div.session-item) (evt, el) {
             var id = el.attributes["data-id"];
             if (id) $(#remote-id).value = formatId(id);
@@ -1212,6 +1838,8 @@ self.ready = function() {
             if (id) $(#ctx-menu-flag).text = id;
             return true;
         }
+
+        dbg("OK: session event handlers");
 
         var ctx_peer_id = "";
         var ctx_is_fav = false;
@@ -1287,68 +1915,67 @@ self.ready = function() {
             ctx_peer_id = "";
         }
 
-        $(#ctx-menu-overlay).onClick = function() { hideCtxMenu(); };
-
-        $(#ctx-connect).onClick = function() {
+        try { $(#ctx-menu-overlay).onClick = function() { hideCtxMenu(); }; } catch(e) { dbg("FAIL: ctx-menu-overlay: " + e); }
+        try { $(#ctx-connect).onClick = function() {
             if (ctx_peer_id) $(#connect-target).text = ctx_peer_id;
             hideCtxMenu();
-        };
-        $(#ctx-transfer).onClick = function() {
+        }; } catch(e) { dbg("FAIL: ctx-connect: " + e); }
+        try { $(#ctx-transfer).onClick = function() {
             if (ctx_peer_id) $(#ft-target).text = ctx_peer_id;
             hideCtxMenu();
-        };
-        $(#ctx-wol).onClick = function() {
+        }; } catch(e) { dbg("FAIL: ctx-transfer: " + e); }
+        try { $(#ctx-wol).onClick = function() {
             if (ctx_peer_id) $(#wol-flag).text = ctx_peer_id;
             hideCtxMenu();
-        };
-        $(#ctx-set-mac).onClick = function() {
+        }; } catch(e) { dbg("FAIL: ctx-wol: " + e); }
+        try { $(#ctx-set-mac).onClick = function() {
             if (!ctx_peer_id) { hideCtxMenu(); return; }
             hideCtxMenu();
             $(#mac-input).value = "";
             $(#mac-error).text = "";
             $(#mac-overlay).style#display = "block";
             $(#mac-input).state.focus = true;
-        };
-        $(#ctx-rename).onClick = function() {
+        }; } catch(e) { dbg("FAIL: ctx-set-mac: " + e); }
+        try { $(#ctx-rename).onClick = function() {
             if (!ctx_peer_id) { hideCtxMenu(); return; }
             hideCtxMenu();
-
             $(#rename-input).value = "";
             $(#rename-overlay).style#display = "block";
             $(#rename-input).state.focus = true;
-        };
-        $(#ctx-add-fav).onClick = function() {
+        }; } catch(e) { dbg("FAIL: ctx-rename: " + e); }
+        try { $(#ctx-add-fav).onClick = function() {
             if (ctx_peer_id) $(#fav-toggle-flag).text = ctx_peer_id;
             hideCtxMenu();
-        };
-        $(#ctx-remove-fav).onClick = function() {
+        }; } catch(e) { dbg("FAIL: ctx-add-fav: " + e); }
+        try { $(#ctx-remove-fav).onClick = function() {
             if (ctx_peer_id) $(#fav-toggle-flag).text = ctx_peer_id;
             hideCtxMenu();
-        };
-        $(#ctx-forget-pw).onClick = function() {
+        }; } catch(e) { dbg("FAIL: ctx-remove-fav: " + e); }
+        try { $(#ctx-forget-pw).onClick = function() {
             if (ctx_peer_id) $(#forget-pw-flag).text = ctx_peer_id;
             hideCtxMenu();
-        };
-        $(#ctx-remove).onClick = function() {
+        }; } catch(e) { dbg("FAIL: ctx-forget-pw: " + e); }
+        try { $(#ctx-remove).onClick = function() {
             if (ctx_peer_id) $(#remove-peer-flag).text = ctx_peer_id;
             hideCtxMenu();
-        };
+        }; } catch(e) { dbg("FAIL: ctx-remove: " + e); }
+        dbg("OK: ctx-menu handlers");
 
-        event click $(#rename-cancel) {
+        try { $(#rename-cancel).onClick = function() {
             $(#rename-overlay).style#display = "none";
-        }
-        event click $(#rename-save) {
+        }; } catch(e) { dbg("FAIL: rename-cancel: " + e); }
+        try { $(#rename-save).onClick = function() {
             var alias = $(#rename-input).value || "";
             if (ctx_peer_id) {
                 $(#rename-peer-flag).text = ctx_peer_id + "|" + alias;
             }
             $(#rename-overlay).style#display = "none";
-        }
+        }; } catch(e) { dbg("FAIL: rename-save: " + e); }
 
-        event click $(#mac-cancel) {
+        try { $(#mac-cancel).onClick = function() {
             $(#mac-overlay).style#display = "none";
-        }
-        event click $(#mac-save) {
+        }; } catch(e) { dbg("FAIL: mac-cancel: " + e); }
+        try { $(#mac-save).onClick = function() {
             var mac = ($(#mac-input).value || "").toUpperCase().replace(/-/g, ":");
             var re = /^[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}$/;
             if (!re.test(mac)) {
@@ -1359,7 +1986,27 @@ self.ready = function() {
                 $(#set-mac-flag).text = ctx_peer_id + "|" + mac;
             }
             $(#mac-overlay).style#display = "none";
+        }; } catch(e) { dbg("FAIL: mac-save: " + e); }
+
+        // Lang items use event delegation (dynamically populated list)
+        function bindLangItems() {
+            for (var item in $$(#lang-list .lang-item)) {
+                item.onClick = function() {
+                    var code = this.attributes["data-code"];
+                    if (!code) return;
+                    for (var li in $$(#lang-list .lang-item)) {
+                        li.attributes.removeClass("selected");
+                    }
+                    this.attributes.addClass("selected");
+                    $(#current-lang-code).text = code;
+                    $(#set-lang-flag).text = code;
+                    $(#current-lang-display).text = this.text;
+                    $(#lang-overlay).style#display = "none";
+                };
+            }
         }
+
+        dbg("ALL HANDLERS DONE");
 
     </script>
 </body>

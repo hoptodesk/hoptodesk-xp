@@ -23,6 +23,93 @@ lazy_static::lazy_static! {
     static ref CURRENT_CM_SESSION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 }
 
+/// Persistent direct IP access listener. Accepts connections in a loop
+/// on a fixed port when "direct-server" is enabled.
+pub fn run_direct_server(
+    my_id: String,
+    password: String,
+    pk: Vec<u8>,
+) {
+    loop {
+        let cfg = crate::config::Config2::load();
+        let enabled = cfg.get_option("direct-server");
+        let service_stopped = cfg.get_option("stop-service") == "Y";
+        if enabled.is_empty() || enabled == "N" || service_stopped {
+            // Not enabled or service stopped — check again in a few seconds
+            std::thread::sleep(Duration::from_secs(3));
+            continue;
+        }
+
+        let port: u16 = cfg.get_option("direct-access-port")
+            .parse()
+            .unwrap_or(21118);
+        let addr = format!("0.0.0.0:{}", port);
+
+        let listener = match TcpListener::bind(&addr) {
+            Ok(l) => {
+                crate::config::write_log(&format!("[direct] Listening on port {}", port));
+                l
+            }
+            Err(e) => {
+                crate::config::write_log(&format!("[direct] Failed to bind {}: {}", addr, e));
+                std::thread::sleep(Duration::from_secs(5));
+                continue;
+            }
+        };
+
+        listener.set_nonblocking(true).ok();
+
+        loop {
+            // Check if still enabled or port changed
+            let cfg2 = crate::config::Config2::load();
+            let still_enabled = cfg2.get_option("direct-server");
+            let service_stopped = cfg2.get_option("stop-service") == "Y";
+            if still_enabled.is_empty() || still_enabled == "N" || service_stopped {
+                crate::config::write_log("[direct] Direct server disabled or service stopped, stopping listener");
+                break;
+            }
+            let new_port: u16 = cfg2.get_option("direct-access-port")
+                .parse()
+                .unwrap_or(21118);
+            if new_port != port {
+                crate::config::write_log(&format!("[direct] Port changed to {}, rebinding", new_port));
+                break;
+            }
+
+            match listener.accept() {
+                Ok((tcp_stream, peer_addr)) => {
+                    crate::config::write_log(&format!(
+                        "[direct] Incoming connection from {}",
+                        crate::config::mask_ip(&peer_addr)
+                    ));
+                    tcp_stream.set_nodelay(true).ok();
+
+                    let my_id = my_id.clone();
+                    let password = password.clone();
+                    let pk = pk.clone();
+                    std::thread::spawn(move || {
+                        let mut stream = FramedStream::from_tcp(tcp_stream);
+                        stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+                        stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
+                        let stop = Arc::new(AtomicBool::new(false));
+                        if let Err(e) = run_session_public(&mut stream, &my_id, &password, &pk, &stop) {
+                            crate::config::write_log(&format!("[direct] Session error: {}", e));
+                        }
+                        crate::config::write_log("[direct] Session ended");
+                    });
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                Err(e) => {
+                    crate::config::write_log(&format!("[direct] Accept error: {}", e));
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            }
+        }
+    }
+}
+
 pub fn accept_connection(
     listener: TcpListener,
     my_id: &str,
@@ -418,17 +505,106 @@ pub fn run_session_public(
         }
     }
 
+    // 2FA check
+    if let Some(totp_secret) = crate::auth_2fa::get_2fa_secret() {
+        crate::config::write_log("[server] 2FA enabled, sending 2FA Required");
+        let mut resp_2fa = message_proto::LoginResponse::new();
+        resp_2fa.union = Some(message_proto::login_response::Union::Error(
+            "2FA Required".to_string(),
+        ));
+        let mut msg_2fa = message_proto::Message::new();
+        msg_2fa.set_login_response(resp_2fa);
+        stream.send_msg(&msg_2fa.write_to_bytes().map_err(io_err)?)?;
+
+        // Wait for Auth2FA message
+        stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
+        let mut tfa_verified = false;
+        let mut tfa_attempts = 0;
+        while tfa_attempts < 5 {
+            let data = match stream.recv_msg() {
+                Ok(d) => d,
+                Err(_) => {
+                    crate::config::write_log("[server] 2FA: connection closed or timeout");
+                    return Ok(());
+                }
+            };
+            let msg = match message_proto::Message::parse_from_bytes(&data) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            match &msg.union {
+                Some(message_proto::message::Union::Auth2fa(tfa)) => {
+                    tfa_attempts += 1;
+                    if crate::auth_2fa::verify_code(&totp_secret, &tfa.code) {
+                        crate::config::write_log("[server] 2FA code verified");
+                        tfa_verified = true;
+                        break;
+                    } else {
+                        crate::config::write_log(&format!(
+                            "[server] 2FA wrong code (attempt {})",
+                            tfa_attempts
+                        ));
+                        let mut resp_err = message_proto::LoginResponse::new();
+                        resp_err.union = Some(message_proto::login_response::Union::Error(
+                            "2FA Required".to_string(),
+                        ));
+                        let mut msg_err = message_proto::Message::new();
+                        msg_err.set_login_response(resp_err);
+                        stream.send_msg(&msg_err.write_to_bytes().map_err(io_err)?)?;
+                    }
+                }
+                Some(message_proto::message::Union::TestDelay(td)) => {
+                    let mut resp_td = message_proto::TestDelay::new();
+                    resp_td.time = td.time;
+                    resp_td.last_delay = td.last_delay;
+                    resp_td.from_client = false;
+                    let mut reply = message_proto::Message::new();
+                    reply.set_test_delay(resp_td);
+                    let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
+                }
+                _ => {}
+            }
+        }
+        if !tfa_verified {
+            crate::config::write_log("[server] 2FA failed, disconnecting");
+            return Ok(());
+        }
+    }
+
     crate::config::write_log(&format!("[server] Password OK, sending PeerInfo"));
 
     let is_file_transfer = lr.union.as_ref().map_or(false, |u| {
         matches!(u, message_proto::login_request::Union::FileTransfer(_))
     });
-    crate::config::write_log(&format!("[server] Session type: file_transfer={}, union={:?}", is_file_transfer, lr.union.as_ref().map(|u| match u {
-        message_proto::login_request::Union::FileTransfer(_) => "FileTransfer",
-        message_proto::login_request::Union::PortForward(_) => "PortForward",
-        message_proto::login_request::Union::ViewCamera(_) => "ViewCamera",
-        message_proto::login_request::Union::Terminal(_) => "Terminal",
-    })));
+    let is_port_forward = lr.union.as_ref().map_or(false, |u| {
+        matches!(u, message_proto::login_request::Union::PortForward(_))
+    });
+    crate::config::write_log(&format!("[server] Session type: file_transfer={}, port_forward={}", is_file_transfer, is_port_forward));
+
+    // Check feature permissions
+    let cfg2_perms = crate::config::Config2::load();
+    if is_file_transfer && cfg2_perms.get_option("enable-file-transfer") == "N" {
+        crate::config::write_log("[server] File transfer denied — disabled in settings");
+        let mut resp = message_proto::LoginResponse::new();
+        resp.union = Some(message_proto::login_response::Union::Error(
+            "File transfer is not enabled on the remote machine".to_string(),
+        ));
+        let mut msg = message_proto::Message::new();
+        msg.set_login_response(resp);
+        stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+        return Ok(());
+    }
+    if is_port_forward && cfg2_perms.get_option("enable-tunnel") == "N" {
+        crate::config::write_log("[server] TCP tunneling denied — disabled in settings");
+        let mut resp = message_proto::LoginResponse::new();
+        resp.union = Some(message_proto::login_response::Union::Error(
+            "TCP tunneling is not enabled on the remote machine".to_string(),
+        ));
+        let mut msg = message_proto::Message::new();
+        msg.set_login_response(resp);
+        stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+        return Ok(());
+    }
 
     let mut peer_info = message_proto::PeerInfo::new();
     peer_info.username = std::env::var("USERNAME").unwrap_or_default();
@@ -471,6 +647,28 @@ pub fn run_session_public(
     stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
 
     crate::config::write_log(&format!("[server] Login successful, starting session"));
+
+    // Send initial permission states so controlling client knows what's allowed
+    {
+        let cfg2 = crate::config::Config2::load();
+        let perms = [
+            (message_proto::permission_info::Permission::Keyboard, cfg2.get_option("enable-keyboard") != "N"),
+            (message_proto::permission_info::Permission::Clipboard, cfg2.get_option("enable-clipboard") != "N"),
+            (message_proto::permission_info::Permission::Audio, true),
+            (message_proto::permission_info::Permission::File, cfg2.get_option("enable-file-transfer") != "N"),
+            (message_proto::permission_info::Permission::Restart, cfg2.get_option("enable-remote-restart") != "N"),
+        ];
+        for (perm, enabled) in perms {
+            let mut perm_info = message_proto::PermissionInfo::new();
+            perm_info.permission = protobuf::EnumOrUnknown::new(perm);
+            perm_info.enabled = enabled;
+            let mut misc = message_proto::Misc::new();
+            misc.set_permission_info(perm_info);
+            let mut pmsg = message_proto::Message::new();
+            pmsg.set_misc(misc);
+            let _ = stream.send_msg(&pmsg.write_to_bytes().unwrap_or_default());
+        }
+    }
 
     let cm_session_id = if let Some(ref existing) = approval_cm_session {
         crate::config::write_log(&format!("[server] Reusing approval CM {} for session", existing));
@@ -627,7 +825,15 @@ fn run_video_input_loop(
                             break;
                         }
                     }
-                    if let Some(reply) = handle_peer_message(&msg, screen_width, screen_height, keyboard_enabled, clipboard_enabled) {
+                    // Handle Cliprdr (file clipboard) messages separately — may produce multiple replies
+                    if let Some(message_proto::message::Union::Cliprdr(ref cliprdr)) = msg.union {
+                        if clipboard_enabled {
+                            let replies = crate::clipboard_file::handle_cliprdr_host(cliprdr);
+                            for reply in replies {
+                                let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
+                            }
+                        }
+                    } else if let Some(reply) = handle_peer_message(&msg, screen_width, screen_height, keyboard_enabled, clipboard_enabled) {
                         let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
                     }
                 }
@@ -641,9 +847,61 @@ fn run_video_input_loop(
             }
         }
 
+        // Process permission toggles from CM BEFORE clipboard check
+        if let Ok(s) = CURRENT_CM_SESSION.lock() {
+            if let Some(ref sid) = *s {
+                let path = cm::cm_perm_path(sid);
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    let _ = std::fs::remove_file(&path);
+                    if !text.is_empty() {
+
+                        let parts: Vec<&str> = text.splitn(2, '|').collect();
+                        if parts.len() == 2 {
+                            let perm_name = parts[0];
+                            let enabled = parts[1] == "1";
+                            crate::config::write_log(&format!("[server] Permission change: {}={}", perm_name, enabled));
+
+                            // Send PermissionInfo to controlling client (this is what it listens for)
+                            let perm_enum = match perm_name {
+                                "keyboard" => Some(message_proto::permission_info::Permission::Keyboard),
+                                "clipboard" => Some(message_proto::permission_info::Permission::Clipboard),
+                                "audio" => Some(message_proto::permission_info::Permission::Audio),
+                                _ => None,
+                            };
+                            if let Some(perm) = perm_enum {
+                                let mut perm_info = message_proto::PermissionInfo::new();
+                                perm_info.permission = protobuf::EnumOrUnknown::new(perm);
+                                perm_info.enabled = enabled;
+                                let mut misc = message_proto::Misc::new();
+                                misc.set_permission_info(perm_info);
+                                let mut msg = message_proto::Message::new();
+                                msg.set_misc(misc);
+                                let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
+                            }
+
+                            match perm_name {
+                                "keyboard" => { keyboard_enabled = enabled; }
+                                "clipboard" => {
+                                    clipboard_enabled = enabled;
+                                    if !enabled {
+                                        // Clear tracked clipboard so re-enabling doesn't immediately re-send
+                                        last_clipboard_text.clear();
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if clipboard_enabled && last_clipboard_check.elapsed() >= clipboard_check_interval {
             last_clipboard_check = Instant::now();
-            if let Some(msg) = crate::clipboard::check_clipboard_change(&mut last_clipboard_text) {
+            // Check for file clipboard first (CF_HDROP takes priority)
+            if let Some(msg) = crate::clipboard_file::check_clipboard_files_change() {
+                let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
+            } else if let Some(msg) = crate::clipboard::check_clipboard_change(&mut last_clipboard_text) {
                 let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
             }
         }
@@ -661,52 +919,6 @@ fn run_video_input_loop(
                         let mut msg = message_proto::Message::new();
                         msg.set_misc(misc);
                         let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
-                    }
-                }
-            }
-        }
-
-        if let Ok(s) = CURRENT_CM_SESSION.lock() {
-            if let Some(ref sid) = *s {
-                let path = cm::cm_perm_path(sid);
-                if let Ok(text) = std::fs::read_to_string(&path) {
-                    let _ = std::fs::remove_file(&path);
-                    if !text.is_empty() {
-
-                        let parts: Vec<&str> = text.splitn(2, '|').collect();
-                        if parts.len() == 2 {
-                            let perm_name = parts[0];
-                            let enabled = parts[1] == "1";
-                            crate::config::write_log(&format!("[server] Permission change: {}={}", perm_name, enabled));
-
-                            let mut option = message_proto::OptionMessage::new();
-                            match perm_name {
-                                "keyboard" => {
-                                    if enabled { option.disable_keyboard = protobuf::EnumOrUnknown::new(message_proto::option_message::BoolOption::No); }
-                                    else { option.disable_keyboard = protobuf::EnumOrUnknown::new(message_proto::option_message::BoolOption::Yes); }
-                                }
-                                "clipboard" => {
-                                    if enabled { option.disable_clipboard = protobuf::EnumOrUnknown::new(message_proto::option_message::BoolOption::No); }
-                                    else { option.disable_clipboard = protobuf::EnumOrUnknown::new(message_proto::option_message::BoolOption::Yes); }
-                                }
-                                "audio" => {
-                                    if enabled { option.disable_audio = protobuf::EnumOrUnknown::new(message_proto::option_message::BoolOption::No); }
-                                    else { option.disable_audio = protobuf::EnumOrUnknown::new(message_proto::option_message::BoolOption::Yes); }
-                                }
-                                _ => {}
-                            }
-                            let mut misc = message_proto::Misc::new();
-                            misc.set_option(option);
-                            let mut msg = message_proto::Message::new();
-                            msg.set_misc(misc);
-                            let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
-
-                            match perm_name {
-                                "keyboard" => { keyboard_enabled = enabled; }
-                                "clipboard" => { clipboard_enabled = enabled; }
-                                _ => {}
-                            }
-                        }
                     }
                 }
             }
@@ -760,6 +972,7 @@ fn run_video_input_loop(
         }
     }
 
+    crate::clipboard_file::reset();
     Ok(())
 }
 
@@ -990,6 +1203,12 @@ fn handle_misc(misc: &message_proto::Misc) -> Option<message_proto::Message> {
         }
         Some(message_proto::misc::Union::RestartRemoteDevice(_)) => {
             crate::config::write_log(&format!("[server] Restart requested by remote peer"));
+            // Check if remote restart is allowed (default-on: enabled unless "N")
+            let restart_opt = crate::config::Config2::load().get_option("enable-remote-restart");
+            if restart_opt == "N" {
+                crate::config::write_log("[server] Remote restart denied — disabled in settings");
+                return None;
+            }
 
             unsafe {
                 #[repr(C)]
@@ -1114,6 +1333,74 @@ fn compute_prehashed_check(password: &str, challenge: &str) -> [u8; 32] {
 
 fn generate_random_string(len: usize) -> String {
     crate::config::generate_random_string(len)
+}
+
+fn run_port_forward_loop(
+    stream: &mut FramedStream,
+    target_host: &str,
+    target_port: u16,
+    stop: &Arc<AtomicBool>,
+) -> io::Result<()> {
+    use std::net::TcpStream as StdTcpStream;
+
+    crate::config::write_log(&format!("[server/pf] Connecting to target {}:{}", target_host, target_port));
+
+    let addrs: Vec<std::net::SocketAddr> =
+        std::net::ToSocketAddrs::to_socket_addrs(&(target_host, target_port))?
+            .collect();
+    if addrs.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "DNS resolve failed for tunnel target"));
+    }
+    let mut target = StdTcpStream::connect_timeout(&addrs[0], Duration::from_secs(5))?;
+    target.set_nodelay(true).ok();
+    target.set_nonblocking(true).ok();
+
+    crate::config::write_log("[server/pf] Connected to target, starting bidirectional relay");
+    stream.set_read_timeout(Some(Duration::from_millis(20))).ok();
+
+    let mut buf = [0u8; 65536];
+    let mut idle_count = 0u32;
+    loop {
+        if stop.load(Ordering::Relaxed) { break; }
+
+        let mut had_data = false;
+
+        // Remote client → target service (raw bytes)
+        match stream.recv_msg() {
+            Ok(data) => {
+                if data.is_empty() { break; }
+                had_data = true;
+                use std::io::Write;
+                if target.write_all(&data).is_err() { break; }
+                target.flush().ok();
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {}
+            Err(_) => break,
+        }
+
+        // Target service → remote client (raw bytes)
+        match std::io::Read::read(&mut target, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                had_data = true;
+                if stream.send_msg(&buf[..n]).is_err() { break; }
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(_) => break,
+        }
+
+        if !had_data {
+            idle_count += 1;
+            if idle_count > 10 {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        } else {
+            idle_count = 0;
+        }
+    }
+
+    crate::config::write_log("[server/pf] Port forward session ended");
+    Ok(())
 }
 
 fn run_file_transfer_loop(

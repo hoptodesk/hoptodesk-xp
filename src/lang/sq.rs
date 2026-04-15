@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Bosh"),
         ("Invalid folder name", "Emri i dosjes i pavlefshëm"),
         ("SOCKS5 Proxy", "SOCKS5 Proxy"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "I pambuluar"),
         ("install_daemon_tip", "Për të nisur në boot, duhet të instaloni shërbimin e sistemit"),
         ("Remote ID", "ID në distancë"),

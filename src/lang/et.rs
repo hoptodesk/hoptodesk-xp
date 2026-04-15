@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "Tühi"),
         ("Invalid folder name", "Kehtetu kaustanimi"),
         ("SOCKS5 Proxy", "SOCKS5 proksi"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "Avastatud"),
         ("install_daemon_tip", "Süsteemikäivitusel käivitamiseks tuleb paigaldada süsteemiteenus."),
         ("Remote ID", "Kaug-ID"),

@@ -51,6 +51,19 @@ fn main() {
             .compile("vpx_helper");
     }
 
+    // bcrypt shim for XP compatibility:
+    // Ring (used by rustls) imports BCryptGenRandom from bcrypt.dll (Vista+).
+    // bcrypt_shim.c provides xp_BCryptGenRandom using CryptGenRandom (XP-safe).
+    // bcrypt_imp.asm overrides the __imp__BCryptGenRandom@16 thunk,
+    // preventing the linker from importing BCryptGenRandom from bcrypt.dll.
+    #[cfg(target_os = "windows")]
+    {
+        cc::Build::new()
+            .file("src/bcrypt_shim.c")
+            .file("src/bcrypt_imp.asm")
+            .compile("bcrypt_shim");
+    }
+
     // FLS→TLS shim for XP compatibility:
     // VS2022's static CRT calls FlsAlloc etc. through __imp__ import thunks (Vista+ only).
     // fls_shim.c provides xp_FlsAlloc wrappers that call TlsAlloc (XP-safe).

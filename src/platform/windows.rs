@@ -384,6 +384,150 @@ pub fn set_clipboard_text(text: &str) -> bool {
     }
 }
 
+pub fn get_clipboard_file_paths() -> Option<Vec<String>> {
+    use winapi::um::winuser::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
+    use winapi::um::winbase::{GlobalLock, GlobalUnlock, GlobalSize};
+
+    const CF_HDROP: UINT = 15;
+
+    unsafe {
+        if IsClipboardFormatAvailable(CF_HDROP) == FALSE {
+            return None;
+        }
+        if OpenClipboard(std::ptr::null_mut()) == FALSE {
+            return None;
+        }
+        let handle = GetClipboardData(CF_HDROP);
+        if handle.is_null() {
+            CloseClipboard();
+            return None;
+        }
+        let ptr = GlobalLock(handle) as *const u8;
+        if ptr.is_null() {
+            CloseClipboard();
+            return None;
+        }
+        let mem_size = GlobalSize(handle);
+        if mem_size < 20 {
+            GlobalUnlock(handle);
+            CloseClipboard();
+            return None;
+        }
+
+        // DROPFILES header: pFiles(4) + pt.x(4) + pt.y(4) + fNC(4) + fWide(4) = 20 bytes
+        let p_files = *(ptr as *const u32) as usize;
+        let f_wide = *(ptr.add(16) as *const i32);
+
+        let mut paths = Vec::new();
+
+        if f_wide != 0 {
+            let start = ptr.add(p_files) as *const u16;
+            let max_u16 = (mem_size - p_files) / 2;
+            let mut pos = 0usize;
+            while pos < max_u16 {
+                if *start.add(pos) == 0 {
+                    break;
+                }
+                let mut len = 0;
+                while pos + len < max_u16 && *start.add(pos + len) != 0 {
+                    len += 1;
+                }
+                let slice = std::slice::from_raw_parts(start.add(pos), len);
+                paths.push(String::from_utf16_lossy(slice));
+                pos += len + 1;
+            }
+        } else {
+            let start = ptr.add(p_files);
+            let max_bytes = mem_size - p_files;
+            let mut pos = 0usize;
+            while pos < max_bytes {
+                if *start.add(pos) == 0 {
+                    break;
+                }
+                let mut len = 0;
+                while pos + len < max_bytes && *start.add(pos + len) != 0 {
+                    len += 1;
+                }
+                let slice = std::slice::from_raw_parts(start.add(pos), len);
+                if let Ok(s) = std::str::from_utf8(slice) {
+                    paths.push(s.to_string());
+                }
+                pos += len + 1;
+            }
+        }
+
+        GlobalUnlock(handle);
+        CloseClipboard();
+        if paths.is_empty() {
+            None
+        } else {
+            Some(paths)
+        }
+    }
+}
+
+pub fn set_clipboard_files(paths: &[String]) -> bool {
+    use winapi::um::winuser::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use winapi::um::winbase::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT};
+
+    const CF_HDROP: UINT = 15;
+
+    if paths.is_empty() {
+        return false;
+    }
+
+    // Build DROPFILES structure
+    // Header: 20 bytes (pFiles=20, pt=(0,0), fNC=0, fWide=1)
+    // Then double-null-terminated list of wide strings
+    let mut wide_data: Vec<u16> = Vec::new();
+    for path in paths {
+        let wide: Vec<u16> = path.encode_utf16().collect();
+        wide_data.extend_from_slice(&wide);
+        wide_data.push(0); // null terminator for this string
+    }
+    wide_data.push(0); // double null terminator
+
+    let header_size = 20usize;
+    let total_size = header_size + wide_data.len() * 2;
+
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == FALSE {
+            return false;
+        }
+        EmptyClipboard();
+
+        let hmem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, total_size);
+        if hmem.is_null() {
+            CloseClipboard();
+            return false;
+        }
+
+        let ptr = GlobalLock(hmem) as *mut u8;
+        if ptr.is_null() {
+            CloseClipboard();
+            return false;
+        }
+
+        // DROPFILES header
+        *(ptr as *mut u32) = header_size as u32; // pFiles
+        // pt.x, pt.y, fNC already zero from GMEM_ZEROINIT
+        *(ptr.add(16) as *mut i32) = 1; // fWide = TRUE
+
+        // Copy wide string data
+        let dest = ptr.add(header_size) as *mut u16;
+        std::ptr::copy_nonoverlapping(wide_data.as_ptr(), dest, wide_data.len());
+
+        GlobalUnlock(hmem);
+        SetClipboardData(CF_HDROP, hmem);
+        CloseClipboard();
+        true
+    }
+}
+
 pub fn get_cursor_pos() -> Option<(i32, i32)> {
     unsafe {
         let mut pt: POINT = std::mem::zeroed();

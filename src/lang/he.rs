@@ -237,6 +237,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Empty", "ריק"),
         ("Invalid folder name", "שם תיקייה אינו תקין"),
         ("SOCKS5 Proxy", "פרוקסי SOCKS5"),
+        ("Proxy Settings", "Proxy Settings"),
+        ("Auto Detect", "Auto Detect"),
         ("Discovered", "נמצא"),
         ("install_daemon_tip", "לצורך הפעלה בעת הפעלת המחשב, עליך להתקין שירות מערכת."),
         ("Remote ID", "מזהה מרוחק"),

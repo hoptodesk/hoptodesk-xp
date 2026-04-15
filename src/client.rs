@@ -29,6 +29,9 @@ pub struct ClientState {
     pub file_actions_out: Arc<Mutex<VecDeque<message_proto::FileAction>>>,
 
     pub chat_messages: Arc<Mutex<VecDeque<(String, String)>>>,
+
+    pub recording: bool,
+    pub recorder: Option<crate::recording::Recorder>,
 }
 
 pub struct DisplayMeta {
@@ -56,6 +59,8 @@ impl Default for ClientState {
             file_responses: Arc::new(Mutex::new(VecDeque::new())),
             file_actions_out: Arc::new(Mutex::new(VecDeque::new())),
             chat_messages: Arc::new(Mutex::new(VecDeque::new())),
+            recording: false,
+            recorder: None,
         }
     }
 }
@@ -385,7 +390,94 @@ fn run_client_inner(
         }
     }
 
+    // Handle login response — may need to wait for remote acceptance
+    let final_peer_info: Option<message_proto::PeerInfo>;
     match login_resp.union {
+        Some(message_proto::login_response::Union::Error(ref e))
+            if e == "No Password Access" =>
+        {
+            // Remote side has no password set — wait for them to click Accept/Reject.
+            // Do NOT disconnect; the server will send a new LoginResponse with PeerInfo
+            // when the remote user accepts, or a CloseReason if they reject.
+            crate::config::write_log("[client] No Password Access — waiting for remote acceptance...");
+            if let Ok(mut state) = client_state.lock() {
+                state.status = "waiting".into();
+                state.error = "Waiting for remote acceptance...".into();
+            }
+
+            // Wait up to 60 seconds for remote accept/reject
+            stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
+            let accept_deadline = Instant::now() + Duration::from_secs(60);
+            let mut accepted = false;
+            loop {
+                if Instant::now() >= accept_deadline {
+                    crate::config::write_log("[client] Timed out waiting for remote acceptance");
+                    if let Ok(mut state) = client_state.lock() {
+                        state.status = "error".into();
+                        state.error = "Remote side did not respond".into();
+                    }
+                    return Ok(());
+                }
+                let data = match stream.recv_msg() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        crate::config::write_log(&format!("[client] Error waiting for acceptance: {}", e));
+                        if let Ok(mut state) = client_state.lock() {
+                            state.status = "error".into();
+                            state.error = format!("Connection error: {}", e);
+                        }
+                        return Ok(());
+                    }
+                };
+                let msg = message_proto::Message::parse_from_bytes(&data).map_err(io_err)?;
+                match msg.union {
+                    Some(message_proto::message::Union::LoginResponse(lr)) => {
+                        match lr.union {
+                            Some(message_proto::login_response::Union::PeerInfo(pi)) => {
+                                crate::config::write_log("[client] Remote accepted connection!");
+                                final_peer_info = Some(pi);
+                                accepted = true;
+                                break;
+                            }
+                            Some(message_proto::login_response::Union::Error(e2)) => {
+                                crate::config::write_log(&format!("[client] Remote rejected: {}", e2));
+                                if let Ok(mut state) = client_state.lock() {
+                                    state.status = "error".into();
+                                    state.error = e2;
+                                }
+                                return Ok(());
+                            }
+                            None => continue,
+                        }
+                    }
+                    Some(message_proto::message::Union::Misc(misc)) => {
+                        if let Some(message_proto::misc::Union::CloseReason(reason)) = &misc.union {
+                            crate::config::write_log(&format!("[client] Remote closed: {}", reason));
+                            if let Ok(mut state) = client_state.lock() {
+                                state.status = "error".into();
+                                state.error = reason.clone();
+                            }
+                            return Ok(());
+                        }
+                        continue;
+                    }
+                    Some(message_proto::message::Union::TestDelay(td)) => {
+                        let mut resp = message_proto::TestDelay::new();
+                        resp.time = td.time;
+                        resp.last_delay = td.last_delay;
+                        resp.from_client = true;
+                        let mut reply = message_proto::Message::new();
+                        reply.set_test_delay(resp);
+                        let _ = stream.send_msg(&reply.write_to_bytes().map_err(io_err)?);
+                        continue;
+                    }
+                    _ => continue,
+                }
+            }
+            if !accepted {
+                return Ok(());
+            }
+        }
         Some(message_proto::login_response::Union::Error(e)) => {
             crate::config::write_log(&format!("[client] Login failed: {}", e));
             if let Ok(mut state) = client_state.lock() {
@@ -395,6 +487,18 @@ fn run_client_inner(
             return Ok(());
         }
         Some(message_proto::login_response::Union::PeerInfo(pi)) => {
+            final_peer_info = Some(pi);
+        }
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Empty LoginResponse",
+            ));
+        }
+    }
+
+    // Process PeerInfo (from direct login or after remote acceptance)
+    if let Some(pi) = final_peer_info {
             crate::config::write_log(&format!(
                 "[client] Login OK! Peer: {} ({}) - {} displays",
                 pi.hostname,
@@ -438,13 +542,6 @@ fn run_client_inner(
                     state.frame_height = d.height;
                 }
             }
-        }
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Empty LoginResponse",
-            ))
-        }
     }
 
     let stream = Arc::new(Mutex::new(stream));
@@ -498,7 +595,14 @@ fn run_client_inner(
 
         if last_clipboard_check.elapsed() >= Duration::from_millis(500) {
             last_clipboard_check = Instant::now();
-            if let Some(msg) = crate::clipboard::check_clipboard_change(&mut last_clipboard_text) {
+            // Check for file clipboard first (CF_HDROP takes priority)
+            if let Some(msg) = crate::clipboard_file::check_clipboard_files_change() {
+                if let Ok(mut s) = stream.lock() {
+                    if let Ok(bytes) = msg.write_to_bytes() {
+                        let _ = s.send_msg(&bytes);
+                    }
+                }
+            } else if let Some(msg) = crate::clipboard::check_clipboard_change(&mut last_clipboard_text) {
                 if let Ok(mut s) = stream.lock() {
                     if let Ok(bytes) = msg.write_to_bytes() {
                         let _ = s.send_msg(&bytes);
@@ -557,6 +661,18 @@ fn run_client_inner(
                 }
                 Some(message_proto::message::Union::MultiClipboards(mc)) => {
                     crate::clipboard::handle_multi_clipboards_message(&mc);
+                }
+                Some(message_proto::message::Union::Cliprdr(ref cliprdr)) => {
+                    let replies = crate::clipboard_file::handle_cliprdr_client(cliprdr);
+                    if !replies.is_empty() {
+                        if let Ok(mut s) = stream.lock() {
+                            for reply in replies {
+                                if let Ok(bytes) = reply.write_to_bytes() {
+                                    let _ = s.send_msg(&bytes);
+                                }
+                            }
+                        }
+                    }
                 }
                 Some(message_proto::message::Union::Misc(misc)) => {
                     if handle_misc_from_server(&misc, &client_state) {
@@ -656,6 +772,16 @@ fn handle_video_frame(
             }
             let dec = decoder.as_mut().unwrap();
             for frame in &frames.frames {
+                // Write raw VP8 frame to recorder if recording
+                if let Ok(mut state) = client_state.lock() {
+                    if state.recording {
+                        let keyframe = frame.key;
+                        if let Some(ref mut rec) = state.recorder {
+                            let _ = rec.write_vp8_frame(&frame.data, keyframe);
+                        }
+                    }
+                }
+
                 match dec.decode(&frame.data) {
                     Ok((bgra, w, h)) => {
                         if let Ok(mut state) = client_state.lock() {

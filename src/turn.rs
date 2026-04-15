@@ -342,13 +342,18 @@ pub struct TurnServer {
 }
 
 pub fn get_public_ip() -> Option<SocketAddr> {
+    let t0 = std::time::Instant::now();
     let servers = get_turn_servers_from_api();
+    crate::config::write_log(&format!("[turn] get_public_ip: {} TURN server(s), api took {}ms", servers.len(), t0.elapsed().as_millis()));
     for server in &servers {
         let sock = match resolve_addr(&server.addr) {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(e) => {
+                crate::config::write_log(&format!("[turn] Resolve {} failed: {}", mask_ip(&server.addr), e));
+                continue;
+            }
         };
-        if let Ok(mut stream) = TcpStream::connect_timeout(&sock, Duration::from_secs(3)) {
+        if let Ok(mut stream) = crate::tls_client::connect_tcp_timeout(&sock.ip().to_string(), sock.port(), Duration::from_secs(3)) {
             stream.set_read_timeout(Some(Duration::from_secs(3))).ok();
             stream.set_nodelay(true).ok();
 
@@ -356,18 +361,21 @@ pub fn get_public_ip() -> Option<SocketAddr> {
             if send_stun(&mut stream, &req.build(None)).is_ok() {
                 if let Ok(resp) = recv_stun(&mut stream) {
                     if let Some(addr) = resp.get_xor_addr(ATTR_XOR_MAPPED_ADDR) {
-                        crate::config::write_log(&format!("[turn] Public IP: {}", mask_ip(&addr)));
+                        crate::config::write_log(&format!("[turn] Public IP: {} (total {}ms)", mask_ip(&addr), t0.elapsed().as_millis()));
                         return Some(addr);
                     }
                 }
             }
+        } else {
+            crate::config::write_log(&format!("[turn] Connect to {} failed", mask_ip(&server.addr)));
         }
     }
+    crate::config::write_log(&format!("[turn] get_public_ip failed after {}ms", t0.elapsed().as_millis()));
     None
 }
 
 pub fn get_turn_servers_from_api() -> Vec<TurnServer> {
-    let body = match wininet::http_get("http://api.hoptodesk.com/") {
+    let body = match crate::signal::api_get() {
         Ok(b) => b,
         Err(_) => return Vec::new(),
     };
@@ -507,7 +515,7 @@ fn turn_connection_bind(
     conn_id: u32,
     username: &str, password: &str, realm: &str, nonce: &str,
 ) -> Result<TcpStream, String> {
-    let mut data_conn = TcpStream::connect_timeout(turn_addr, Duration::from_secs(5))
+    let mut data_conn = crate::tls_client::connect_tcp_timeout(&turn_addr.ip().to_string(), turn_addr.port(), Duration::from_secs(5))
         .map_err(|e| format!("data connect: {}", e))?;
     data_conn.set_nodelay(true).ok();
 
@@ -539,7 +547,7 @@ fn try_turn_server(
 
     let turn_sock = resolve_addr(&server.addr)
         .map_err(|e| format!("resolve: {}", e))?;
-    let mut ctrl = TcpStream::connect_timeout(&turn_sock, Duration::from_secs(5))
+    let mut ctrl = crate::tls_client::connect_tcp_timeout(&turn_sock.ip().to_string(), turn_sock.port(), Duration::from_secs(5))
         .map_err(|e| format!("connect: {}", e))?;
     ctrl.set_nodelay(true).ok();
     ctrl.set_read_timeout(Some(Duration::from_secs(10))).ok();
