@@ -125,8 +125,8 @@ class DirectServer: Reactor.Component {
     }
 
     function onClick() {
-        if (is_edit_rdp_port) {
-            is_edit_rdp_port = false;
+        if (is_edit_direct_access_port) {
+            is_edit_direct_access_port = false;
             return;
         }
         handler.set_option("direct-server", handler.get_option("direct-server") == "Y" ? "" : "Y");
@@ -941,6 +941,7 @@ class App: Reactor.Component
                         <div .setting-row id="toggle-enable-keyboard"><span .setting-name>{translate("Keyboard/Mouse")}</span><div .toggle-switch style={toggleBg(isEnabled("enable-keyboard"))}><div .toggle-knob style={knobStyle(isEnabled("enable-keyboard"))} /></div></div>
                         <div .setting-row id="toggle-enable-clipboard"><span .setting-name>{translate("Clipboard")}</span><div .toggle-switch style={toggleBg(isEnabled("enable-clipboard"))}><div .toggle-knob style={knobStyle(isEnabled("enable-clipboard"))} /></div></div>
                         <div .setting-row id="toggle-enable-file-transfer"><span .setting-name>{translate("File Transfer")}</span><div .toggle-switch style={toggleBg(isEnabled("enable-file-transfer"))}><div .toggle-knob style={knobStyle(isEnabled("enable-file-transfer"))} /></div></div>
+                        <div .setting-row id="toggle-enable-terminal"><span .setting-name>{translate("Remote Terminal")}</span><div .toggle-switch style={toggleBg(isEnabled("enable-terminal"))}><div .toggle-knob style={knobStyle(isEnabled("enable-terminal"))} /></div></div>
                         <div .setting-row id="toggle-enable-remote-restart"><span .setting-name>{translate("Remote Restart")}</span><div .toggle-switch style={toggleBg(isEnabled("enable-remote-restart"))}><div .toggle-knob style={knobStyle(isEnabled("enable-remote-restart"))} /></div></div>
                         <div .setting-row id="toggle-enable-tunnel"><span .setting-name>{translate("TCP Tunneling")}</span><div .toggle-switch style={toggleBg(isEnabled("enable-tunnel"))}><div .toggle-knob style={knobStyle(isEnabled("enable-tunnel"))} /></div></div>
                         {is_win || is_osx ? <div .setting-row id="toggle-enable-remote-printing"><span .setting-name>{translate("Remote Printing")}</span><div .toggle-switch style={toggleBg(isEnabled("enable-remote-printing"))}><div .toggle-knob style={knobStyle(isEnabled("enable-remote-printing"))} /></div></div> : ""}
@@ -1618,27 +1619,32 @@ function showDashboardLinkDialog() {
     var isLinked = handler.get_option("dashboard_user_id") != "";
     if (isLinked) {
         var dashId = handler.get_option("dashboard_user_id");
-        msgbox("custom-dashboard-info", translate("Dashboard"),
-            "<div .form>" +
-            "<div style='margin-bottom:0.5em;'>" + translate("This device is linked to a dashboard.") + "</div>" +
-            "<div style='font-family:monospace; font-size:0.9em; color:#666; margin-bottom:1em; word-break:break-all;'>" + dashId + "</div>" +
-            "<div style='color:#888; font-size:0.85em;'>" + translate("To change, enter a new invite code:") + "</div>" +
-            "<input|text(invite_code) style='width:*; margin-top:0.5em;' spellcheck='false' maxlength='16' placeholder='" + translate("16-character invite code") + "' />" +
+        msgbox("custom-nocancel-nook-hasclose", translate("Dashboard"),
+            "<div style='line-height: 1.8em'>" +
+            "<div>" + translate("Status") + ": <b>" + translate("Linked") + "</b></div>" +
+            "<div style='font-family:monospace; font-size:0.85em; color:#666; word-break:break-all; line-height:1.4em; margin-bottom:0.5em;'>" + dashId + "</div>" +
+            "<div .unlink-pill .custom-event action='unlink'>" +
+                "<svg viewBox='0 0 24 24'><path fill='currentColor' d='M17 7h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1 0 1.43-.97 2.63-2.29 2.99l1.46 1.46C20.88 15.61 22 13.95 22 12c0-2.76-2.24-5-5-5zm-1 4h-2.19l2 2H16zM2 4.27l3.11 3.11C3.29 8.12 2 9.91 2 12c0 2.76 2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1 0-1.59 1.21-2.9 2.76-3.07L8.73 11H8v2h2.73L13 15.27V17h1.73l4.01 4.01 1.41-1.41L3.41 2.86 2 4.27z'/></svg>" +
+                translate("Unlink") +
+            "</div>" +
             "</div>",
             null,
-            function(res) {
-                if (!res) return;
-                if (res && typeof res.invite_code !== 'undefined') {
-                    var code = (res.invite_code || "").replace(/\s/g, "");
-                    if (code.length == 0) return;
-                    if (!validateInviteCode(code)) {
-                        msgbox("custom-error", translate("Error"), translate("Invalid invite code. Must be 16 characters (letters and numbers)."));
-                        return;
-                    }
-                    handler.set_option("invite_code", code);
-                    msgbox("custom-success-noedit", translate("Dashboard"), translate("Linking to dashboard... This device will appear in the dashboard shortly."));
+            function(me) {
+                if (me && me.attributes && me.attributes["action"] == "unlink") {
+                    msgbox("custom-hasno-hasyes-nocancel-nook", translate("Dashboard"),
+                        translate("Are you sure you want to unlink this device from the dashboard?"),
+                        null,
+                        function(res) {
+                            if (res) {
+                                handler.set_option("dashboard_user_id", "");
+                                handler.set_option("invite_code", "");
+                                msgbox("custom-nocancel-nook-hasclose", translate("Dashboard"),
+                                    translate("Device has been unlinked from the dashboard."),
+                                    null, function() { showSettingsPanel(); });
+                            }
+                        });
                 }
-            }, 360);
+            }, 220);
     } else {
         msgbox("custom-dashboard-link", translate("Dashboard"),
             "<div .form>" +

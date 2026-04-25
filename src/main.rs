@@ -14,6 +14,7 @@ mod crypto;
 mod dashboard;
 mod file_transfer;
 mod input;
+mod install;
 mod lang;
 mod mcp_server;
 mod network;
@@ -24,6 +25,7 @@ mod remote;
 mod remote_handler;
 mod server;
 mod signal;
+mod terminal_service;
 mod turn;
 mod ui_handler;
 mod vpx;
@@ -31,6 +33,9 @@ mod websocket;
 mod tls_client;
 mod wininet;
 
+// Force sciter.dll into the import table (so XP's loader allocates TLS
+// correctly; see build.rs). sciter.dll must sit next to HopToDesk.exe at
+// launch — the launcher bin (src/bin/launcher.rs) handles that.
 extern "C" {
     fn SciterAPI() -> *const std::ffi::c_void;
 }
@@ -74,6 +79,172 @@ static mut TIMER_TICK: u32 = 0;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+struct MainHandler;
+
+impl MainHandler {
+    fn is_installed(&self) -> bool {
+        let result = crate::install::is_installed();
+        crate::config::write_log(&format!("[handler] is_installed -> {}", result));
+        result
+    }
+
+    fn get_app_name(&self) -> String {
+        crate::install::APP_NAME.to_string()
+    }
+
+    fn install_path(&self) -> String {
+        crate::install::default_install_path()
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn get_option(&self, name: String) -> String {
+        let cfg2 = crate::config::Config2::load();
+        cfg2.get_option(&name)
+    }
+
+    fn show_run_without_install(&self) -> bool {
+        true
+    }
+
+    fn run_without_install(&self) {
+        // No-op: closing the install dialog drops the user back to the
+        // running portable UI, which is "running without install".
+    }
+
+    fn is_installed_daemon(&self, _prompt: bool) -> bool {
+        false
+    }
+
+    fn install_me(&self, args: String, install_path: String) {
+        crate::config::write_log(&format!(
+            "[handler] install_me invoked args='{}' path='{}'",
+            args, install_path
+        ));
+        std::thread::spawn(move || {
+            match crate::install::install_me(&args, &install_path) {
+                Ok(()) => {
+                    crate::config::write_log("[handler] install completed; exiting UI process");
+                    // Service is running now; user can launch from Start Menu.
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    crate::config::write_log(&format!("[handler] install failed: {}", e));
+                }
+            }
+        });
+    }
+
+    fn goto_install(&self) {
+        crate::config::write_log("[handler] goto_install invoked");
+        // Run everything in a background thread so the Sciter UI thread
+        // stays responsive while the MessageBox + install work happens.
+        std::thread::spawn(|| {
+            let install_path = crate::install::default_install_path();
+            let confirm = format!(
+                "Install HopToDesk to:\n\n{}\n\nThis will also register HopToDesk as a Windows Service so it can accept connections without anyone being logged in.\n\nAdministrator privileges are required.",
+                install_path.display()
+            );
+            if !win_confirm(&confirm, "Install HopToDesk") {
+                crate::config::write_log("[handler] user declined install");
+                return;
+            }
+
+            // Install with the default options: both start-menu and
+            // desktop-icon shortcuts enabled, default install path.
+            match crate::install::install_me("startmenu desktopicon", "") {
+                Ok(()) => {
+                    crate::config::write_log("[handler] install completed; exiting UI process");
+                    win_info(
+                        "HopToDesk is now installed and the service is running.\n\nThe app will close. Use the Start Menu or desktop icon to open it again.",
+                        "Install complete",
+                    );
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    crate::config::write_log(&format!("[handler] install failed: {}", e));
+                    win_info(
+                        &format!("Install failed:\n\n{}\n\nMake sure HopToDesk is running as Administrator.", e),
+                        "Install failed",
+                    );
+                }
+            }
+        });
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn win_confirm(text: &str, title: &str) -> bool {
+    use std::ffi::OsStr;
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(
+            hwnd: *mut std::ffi::c_void,
+            text: *const u16,
+            caption: *const u16,
+            utype: u32,
+        ) -> i32;
+    }
+    const MB_OKCANCEL: u32 = 0x00000001;
+    const MB_ICONQUESTION: u32 = 0x00000020;
+    const IDOK: i32 = 1;
+    let text_w: Vec<u16> = OsStr::new(text).encode_wide().chain(once(0)).collect();
+    let title_w: Vec<u16> = OsStr::new(title).encode_wide().chain(once(0)).collect();
+    let result = unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text_w.as_ptr(),
+            title_w.as_ptr(),
+            MB_OKCANCEL | MB_ICONQUESTION,
+        )
+    };
+    result == IDOK
+}
+
+#[cfg(target_os = "windows")]
+fn win_info(text: &str, title: &str) {
+    use std::ffi::OsStr;
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(
+            hwnd: *mut std::ffi::c_void,
+            text: *const u16,
+            caption: *const u16,
+            utype: u32,
+        ) -> i32;
+    }
+    const MB_OK: u32 = 0x00000000;
+    const MB_ICONINFORMATION: u32 = 0x00000040;
+    let text_w: Vec<u16> = OsStr::new(text).encode_wide().chain(once(0)).collect();
+    let title_w: Vec<u16> = OsStr::new(title).encode_wide().chain(once(0)).collect();
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text_w.as_ptr(),
+            title_w.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
+impl sciter::EventHandler for MainHandler {
+    sciter::dispatch_script_call! {
+        fn is_installed();
+        fn get_app_name();
+        fn install_path();
+        fn get_option(String);
+        fn show_run_without_install();
+        fn run_without_install();
+        fn is_installed_daemon(bool);
+        fn install_me(String, String);
+        fn goto_install();
+    }
+}
+
 pub fn format_id(id: &str) -> String {
     if id.len() == 9 {
         format!("{} {} {}", &id[0..3], &id[3..6], &id[6..9])
@@ -82,12 +253,148 @@ pub fn format_id(id: &str) -> String {
     }
 }
 
-fn main() {
+// sciter.dll is in this exe's PE import table and must be on disk at
+// launch. The launcher bin (src/bin/launcher.rs) gets both files into
+// %APPDATA%\HopToDesk\ before CreateProcessW'ing this exe, giving end
+// users a single-file download while keeping XP's loader happy.
 
+#[cfg(target_os = "windows")]
+fn relocate_from_temp_if_needed() {
+    use std::path::PathBuf;
+
+    let current_exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let current_path_str = current_exe.to_string_lossy().to_lowercase();
+
+    // Heuristic: we're in a temp extraction if the path lies under the
+    // user's TEMP dir (or contains "\\temp\\" as a defensive fallback).
+    let temp_dir = std::env::temp_dir().to_string_lossy().to_lowercase();
+    let in_temp = !temp_dir.is_empty() && current_path_str.starts_with(&temp_dir);
+    if !in_temp {
+        return;
+    }
+
+    // Target: %APPDATA%\HopToDesk\HopToDesk.exe (+ sciter.dll next to it).
+    // %APPDATA% is defined on XP through Win11.
+    let appdata = match std::env::var("APPDATA") {
+        Ok(v) if !v.is_empty() => PathBuf::from(v),
+        _ => return,
+    };
+    let target_dir = appdata.join("HopToDesk");
+    let _ = std::fs::create_dir_all(&target_dir);
+    let target_exe = target_dir.join("HopToDesk.exe");
+    let target_dll = target_dir.join("sciter.dll");
+
+    // Copy exe + sciter.dll if missing or size-mismatched.
+    let cur_len = std::fs::metadata(&current_exe).ok().map(|m| m.len()).unwrap_or(0);
+    let tgt_len = std::fs::metadata(&target_exe).ok().map(|m| m.len()).unwrap_or(0);
+    if cur_len == 0 || cur_len != tgt_len {
+        crate::config::write_log(&format!(
+            "[main] Relocating exe: {} -> {}",
+            current_exe.display(),
+            target_exe.display()
+        ));
+        if let Err(e) = std::fs::copy(&current_exe, &target_exe) {
+            crate::config::write_log(&format!("[main] Exe copy failed: {}", e));
+            return;
+        }
+    }
+
+    // sciter.dll lives next to the temp exe; copy it if target is missing or different.
+    if let Some(src_dir) = current_exe.parent() {
+        let src_dll = src_dir.join("sciter.dll");
+        let src_dll_len = std::fs::metadata(&src_dll).ok().map(|m| m.len()).unwrap_or(0);
+        let tgt_dll_len = std::fs::metadata(&target_dll).ok().map(|m| m.len()).unwrap_or(0);
+        if src_dll_len > 0 && src_dll_len != tgt_dll_len {
+            crate::config::write_log(&format!(
+                "[main] Relocating sciter.dll: {} -> {}",
+                src_dll.display(),
+                target_dll.display()
+            ));
+            if let Err(e) = std::fs::copy(&src_dll, &target_dll) {
+                crate::config::write_log(&format!("[main] sciter.dll copy failed: {}", e));
+                return;
+            }
+        }
+    }
+
+    // Clean up old SFX extractions in %TEMP% (best-effort, ignore errors).
+    // Match patterns like "7zS*" which 7-Zip SFX uses.
+    if let Ok(entries) = std::fs::read_dir(&std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("7zS") || name.starts_with("7z") {
+                // Skip the dir we're currently running from; it's locked anyway.
+                if current_exe.parent().map(|cp| cp == p).unwrap_or(false) {
+                    continue;
+                }
+                let _ = std::fs::remove_dir_all(&p);
+            }
+        }
+    }
+
+    // Relaunch from the stable path and exit.
+    crate::config::write_log(&format!("[main] Relaunching from {}", target_exe.display()));
+    let args_forward: Vec<String> = std::env::args().skip(1).collect();
+    match std::process::Command::new(&target_exe).args(&args_forward).spawn() {
+        Ok(_) => {
+            crate::config::write_log("[main] Relaunch succeeded; exiting temp process");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            crate::config::write_log(&format!("[main] Relaunch failed: {} — continuing in temp", e));
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn run_uninstall_with_ui() {
+    let confirm = "Uninstall HopToDesk?\n\nThis will stop and remove the HopToDesk service, delete the installed files, and remove Start Menu / desktop shortcuts.\n\nAdministrator privileges are required.";
+    if !win_confirm(confirm, "Uninstall HopToDesk") {
+        crate::config::write_log("[uninstaller] User declined uninstall");
+        return;
+    }
+    match crate::install::uninstall_me() {
+        Ok(()) => {
+            win_info(
+                "HopToDesk has been uninstalled.",
+                "Uninstall complete",
+            );
+        }
+        Err(e) => {
+            win_info(
+                &format!("Uninstall failed:\n\n{}\n\nMake sure you are running as Administrator.", e),
+                "Uninstall failed",
+            );
+        }
+    }
+}
+
+fn main() {
     config::cleanup_old_logs();
     crate::config::write_log(&format!("[main] HopToDesk {} starting", VERSION));
 
     let args: Vec<String> = std::env::args().collect();
+    crate::config::write_log(&format!("[main] CLI args: {:?}", args));
+
+    // Self-relocate when the SFX dumped us into a temp dir. The 7-Zip SFX
+    // config tries to extract to %APPDATA%\HopToDesk, but the stub used
+    // here (7zSD-hoptodesk.sfx in silent GUIMode) ignores ExtractPathText
+    // on some Windows versions and extracts to %TEMP%\7z* instead. To keep
+    // one stable exe path (so firewall rules / install detection work),
+    // we detect that and copy ourselves + sciter.dll into a fixed user
+    // dir, then relaunch from there.
+    //
+    // Only applies to the main UI launch; subprocess CLI modes (--connect,
+    // --cm, --service, etc.) are invoked with current_exe() from the
+    // already-relocated parent, so they'll already be in the stable dir.
+    #[cfg(target_os = "windows")]
+    if args.len() < 2 || !args[1].starts_with("--") {
+        relocate_from_temp_if_needed();
+    }
 
     if args.len() >= 2 && args[1].starts_with("--") {
         let name = args[1].replace("--", "");
@@ -174,7 +481,31 @@ fn main() {
                 run_ticket_window();
                 std::process::exit(0);
             }
-            _ => {}
+            "--service" => {
+                install::run_as_service();
+                std::process::exit(0);
+            }
+            "--install" => {
+                let install_args = args.get(2).cloned().unwrap_or_default();
+                let install_path = args.get(3).cloned().unwrap_or_default();
+                match install::install_me(&install_args, &install_path) {
+                    Ok(()) => {
+                        println!("Installed");
+                        std::process::exit(0);
+                    }
+                    Err(e) => {
+                        eprintln!("Install failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "--uninstall" => {
+                run_uninstall_with_ui();
+                std::process::exit(0);
+            }
+            other => {
+                crate::config::write_log(&format!("[main] Unrecognised CLI flag '{}', falling through to UI", other));
+            }
         }
     }
 
@@ -432,7 +763,24 @@ fn run_main_ui() {
         (pj, oj)
     };
 
+    // Bake the right Install / Uninstall button visibility into the HTML at
+    // load time so neither button flashes before the polling timer settles.
+    let is_installed_now = crate::install::is_installed();
+    let (install_style, uninstall_style) = if is_installed_now {
+        ("display:none; margin-left:16px;", "display:inline-block; margin-left:16px;")
+    } else {
+        ("display:inline-block; margin-left:16px;", "display:none; margin-left:16px;")
+    };
+
     let html = html_template
+        .replace(
+            "id=\"install-btn\" style=\"display:none; margin-left:16px;\"",
+            &format!("id=\"install-btn\" style=\"{}\"", install_style),
+        )
+        .replace(
+            "id=\"uninstall-btn\" style=\"display:none; margin-left:16px;\"",
+            &format!("id=\"uninstall-btn\" style=\"{}\"", uninstall_style),
+        )
         .replace("Loading...", &id_formatted)
         .replace("------", &my_password)
         .replace(">Version<", &format!(">Version {}<", VERSION))
@@ -451,6 +799,7 @@ fn run_main_ui() {
         .replace("id=\"options-data\" style=\"visibility:hidden;height:0;overflow:hidden;\"></div>",
                  &format!("id=\"options-data\" style=\"visibility:hidden;height:0;overflow:hidden;\">{}</div>", options_json));
 
+    frame.event_handler(MainHandler);
     frame.load_html(html.as_bytes(), Some("this://app/index.html"));
     frame.set_title("HopToDesk");
 
@@ -525,6 +874,64 @@ unsafe extern "system" fn main_timer_callback(
             }
         }
     }
+
+    // Keep the Install / Uninstall button visibility in sync with install state.
+    // Install shown only when NOT installed; Uninstall shown only WHEN installed.
+    {
+        let installed = crate::install::is_installed();
+        if let Ok(Some(mut btn)) = root.find_first("#install-btn") {
+            let _ = btn.set_style_attribute(
+                "display",
+                if installed { "none" } else { "inline-block" },
+            );
+        }
+        if let Ok(Some(mut btn)) = root.find_first("#uninstall-btn") {
+            let _ = btn.set_style_attribute(
+                "display",
+                if installed { "inline-block" } else { "none" },
+            );
+        }
+    }
+
+    // Polled Install button trigger: UI writes "go" into #install-trigger on click.
+    if let Ok(Some(mut el)) = root.find_first("#install-trigger") {
+        let val = el.get_text();
+        if !val.is_empty() {
+            let _ = el.set_text("");
+            crate::config::write_log("[install-ui] Install button clicked (via polling)");
+            std::thread::spawn(|| {
+                let install_path = crate::install::default_install_path();
+                let confirm = format!(
+                    "Install HopToDesk to:\n\n{}\n\nThis will also register HopToDesk as a Windows Service so it can accept connections without anyone being logged in.\n\nAdministrator privileges are required.",
+                    install_path.display()
+                );
+                if !win_confirm(&confirm, "Install HopToDesk") {
+                    crate::config::write_log("[install-ui] User declined install");
+                    return;
+                }
+                match crate::install::install_me("startmenu desktopicon", "") {
+                    Ok(()) => {
+                        crate::config::write_log("[install-ui] Install completed; exiting UI process");
+                        win_info(
+                            "HopToDesk is now installed and the service is running.\n\nThe app will close. Use the Start Menu or desktop icon to open it again.",
+                            "Install complete",
+                        );
+                        std::process::exit(0);
+                    }
+                    Err(e) => {
+                        crate::config::write_log(&format!("[install-ui] Install failed: {}", e));
+                        win_info(
+                            &format!("Install failed:\n\n{}\n\nMake sure HopToDesk is running as Administrator.", e),
+                            "Install failed",
+                        );
+                    }
+                }
+            });
+        }
+    }
+
+    // Uninstall is no longer surfaced in the UI — the Start Menu shortcut
+    // (or Add/Remove Programs) invokes `HopToDesk.exe --uninstall` directly.
 
     if let Ok(Some(mut el)) = root.find_first("#connect-target") {
         let target = el.get_text();

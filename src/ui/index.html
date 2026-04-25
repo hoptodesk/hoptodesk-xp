@@ -902,12 +902,15 @@ self.ready = function() {
     <div class="app">
         <div class="top-bar">
             <div class="brand-name">HopToDesk</div>
+            <button class="button outline" id="install-btn" style="display:none; margin-left:16px;" data-tr="Install">Install</button>
             <div style="width: *;" />
             <div class="connect-status">
                 <span class="connect-status-icon status-connecting" id="status-icon"></span>
                 <span id="status-text" data-tr="Connecting...">Connecting...</span>
             </div>
         </div>
+        <div id="install-trigger" style="display:none"></div>
+        <div id="install-state" style="display:none"></div>
         <div class="main-content">
             <div class="cards-row">
                 <div class="card-device">
@@ -1376,6 +1379,17 @@ self.ready = function() {
             opts[key] = value;
             try { $(#options-data).text = JSON.stringify(opts); } catch(e) {}
         }
+
+        try {
+            var installBtn = $(#install-btn);
+            if (installBtn) {
+                installBtn.onClick = function() {
+                    var trig = $(#install-trigger);
+                    if (trig) trig.text = "go";
+                };
+            }
+            dbg("OK: install-btn");
+        } catch(e) { dbg("FAIL: install-btn: " + e); }
 
         try { $(#ua-set-btn).onClick = function() { openPwSettings(); }; dbg("OK: ua-set-btn"); } catch(e) { dbg("FAIL: ua-set-btn: " + e); }
 

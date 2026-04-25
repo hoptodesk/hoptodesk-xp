@@ -449,10 +449,18 @@ class FolderView : Reactor.Component {
         </tbody>
         {is_osx
           ? <menu.context id={id}>
+              <li #ctx-send>{translate(this.is_remote ? 'Receive' : 'Send')}</li>
+              <li #ctx-rename>{translate('Rename')}</li>
+              <li #ctx-delete>{translate('Delete')}</li>
+              <hr/>
               <li #switch-hidden class={this.show_hidden ? "selected" : ""}><span>{svg_checkmark}</span>{translate('Show Hidden Files')}</li>
             </menu>
           : <popup>
               <menu.context id={id}>
+                <li #ctx-send>{translate(this.is_remote ? 'Receive' : 'Send')}</li>
+                <li #ctx-rename>{translate('Rename')}</li>
+                <li #ctx-delete>{translate('Delete')}</li>
+                <hr/>
                 <li #switch-hidden class={this.show_hidden ? "selected" : ""}><span>{svg_checkmark}</span>{translate('Show Hidden Files')}</li>
               </menu>
             </popup>}
@@ -679,6 +687,80 @@ class FolderView : Reactor.Component {
       this.refreshDir();
     }
 
+    event click $(#ctx-send) {
+      var rows = this.getCurrentRows();
+      if (!rows || rows.length == 0) return;
+      for (var i = 0; i < rows.length; ++i) {
+        file_transfer.job_table.send(rows[i][0], this.is_remote);
+      }
+    }
+
+    event click $(#ctx-delete) {
+      var rows = this.getCurrentRows();
+      if (!rows || rows.length == 0) return;
+
+      var items = [];
+      for (var i = 0; i < rows.length; ++i) {
+        items.push({ path: rows[i][0], type: rows[i][1] });
+      }
+
+      var is_remote = this.is_remote;
+      var me = this;
+      var count = items.length;
+      var msg = count == 1
+        ? translate('Are you sure you want to delete this file?') + "<div.ellipsis style=\"font-weight: bold;\">" + items[0].path + "</div>"
+        : translate('Are you sure you want to delete') + " " + count + " " + translate('items') + "?";
+      msgbox("custom-skip", "Confirm Delete", "<div .form><div>" + msg + "</div></div>", "", function(res=null) {
+        if (!res) return;
+        for (var i = 0; i < items.length; ++i) {
+          var path = items[i].path;
+          var new_history = [];
+          for (var j = 0; j < me.history.length; ++j) {
+            var h = me.history[j];
+            if ((h + me.sep()).indexOf(path + me.sep()) == -1) new_history.push(h);
+          }
+          me.history = new_history;
+        }
+        var jt = file_transfer.job_table;
+        for (var i = 0; i < items.length; ++i) {
+          var id = handler.get_next_job_id();
+          var item = items[i];
+          if (item.type == 1) {
+            jt.job_map[id] = { type: "del-dir", id: id, path: item.path, is_remote: is_remote, confirmed: true };
+            handler.remove_dir_all(id, item.path, is_remote, true);
+          } else {
+            handler.remove_file(id, item.path, 0, is_remote);
+            deleting_single_file_jobs[id] = { is_remote: is_remote, path: item.path };
+          }
+        }
+        self.timer(500ms, function() { refreshDir(is_remote); });
+      });
+    }
+
+    event click $(#ctx-rename) {
+      var row = this.getCurrentRow();
+      if (!row) return;
+      var path = row[0];
+      var old_name = getFileName(this.is_remote, path);
+      var me = this;
+      msgbox("custom", translate("Rename"), "<div .form> \
+            <div>" + translate("Please enter the new name") + ":</div> \
+            <div><input|text(name) .outline-focus value=\"" + old_name + "\" /></div> \
+        </div>", "", function(res=null) {
+          if (!res) return;
+          if (!res.name) return;
+          var new_name = res.name.trim();
+          if (!new_name || new_name == old_name) return;
+          if (new_name.indexOf(me.sep()) >= 0) {
+            handler.msgbox("custom-error", "Rename", "Invalid name");
+            return;
+          }
+          var id = handler.get_next_job_id();
+          handler.rename_file(id, path, new_name, me.is_remote);
+          rename_jobs[id] = { is_remote: me.is_remote };
+        });
+    }
+
     event click $(.goup) () {
       var path = this.fd.path;
       if (!path || path == "/") return;
@@ -875,7 +957,13 @@ handler.jobProgress = function(id, file_num, speed, finished_size) {
 }
 
 handler.jobDone = function(id, file_num = -1) {
-  var job = create_dir_jobs[id];
+  var job = rename_jobs[id];
+  if (job) {
+    delete rename_jobs[id];
+    refreshDir(job.is_remote);
+    return;
+  }
+  job = create_dir_jobs[id];
   if (job) {
     refreshDir(job.is_remote);
     return;
@@ -884,7 +972,13 @@ handler.jobDone = function(id, file_num = -1) {
 }
 
 handler.jobError = function(id, err, file_num = -1) {
-  var job = deleting_single_file_jobs[id];
+  var job = rename_jobs[id];
+  if (job) {
+    delete rename_jobs[id];
+    msgbox("custom-error", "Rename", err);
+    return;
+  }
+  job = deleting_single_file_jobs[id];
   if (job) {
     msgbox("custom-error", "Delete File", err);
     return;
@@ -919,7 +1013,8 @@ function refreshDir(is_remote) {
 }
 
 var deleting_single_file_jobs = {};
-var create_dir_jobs = {}
+var create_dir_jobs = {};
+var rename_jobs = {};
 
 function confirmDelete(id ,path, is_remote) {
   msgbox("custom-skip", "Confirm Delete", "<div .form> \
@@ -981,6 +1076,13 @@ handler.confirmDeleteFiles = function(id, i, name) {
 }
 
 handler.overrideFileConfirm = function(id, file_num, to, is_upload, is_identical) {
+  // Auto-confirm fresh uploads: the Rust side passes to=="" and is_identical=false
+  // when there is no existing file to overwrite on the remote. Skipping the modal
+  // prevents the user from cancelling a perfectly valid upload (issue #2).
+  if (is_upload && !is_identical && (to == "" || to == null)) {
+    handler.set_write_override(id, file_num, true, false, is_upload);
+    return;
+  }
   var jt = file_transfer.job_table;
   var identical_msg = is_identical ? translate("identical_file_tip"): "";
   msgbox("custom-skip", "Confirm Write Strategy", "<div .form> \

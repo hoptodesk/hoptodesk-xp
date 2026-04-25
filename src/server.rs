@@ -579,7 +579,10 @@ pub fn run_session_public(
     let is_port_forward = lr.union.as_ref().map_or(false, |u| {
         matches!(u, message_proto::login_request::Union::PortForward(_))
     });
-    crate::config::write_log(&format!("[server] Session type: file_transfer={}, port_forward={}", is_file_transfer, is_port_forward));
+    let is_terminal = lr.union.as_ref().map_or(false, |u| {
+        matches!(u, message_proto::login_request::Union::Terminal(_))
+    });
+    crate::config::write_log(&format!("[server] Session type: file_transfer={}, port_forward={}, terminal={}", is_file_transfer, is_port_forward, is_terminal));
 
     // Check feature permissions
     let cfg2_perms = crate::config::Config2::load();
@@ -588,6 +591,17 @@ pub fn run_session_public(
         let mut resp = message_proto::LoginResponse::new();
         resp.union = Some(message_proto::login_response::Union::Error(
             "File transfer is not enabled on the remote machine".to_string(),
+        ));
+        let mut msg = message_proto::Message::new();
+        msg.set_login_response(resp);
+        stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+        return Ok(());
+    }
+    if is_terminal && cfg2_perms.get_option("enable-terminal") == "N" {
+        crate::config::write_log("[server] Terminal denied — disabled in settings");
+        let mut resp = message_proto::LoginResponse::new();
+        resp.union = Some(message_proto::login_response::Union::Error(
+            "Remote terminal is not enabled on the remote machine".to_string(),
         ));
         let mut msg = message_proto::Message::new();
         msg.set_login_response(resp);
@@ -614,7 +628,7 @@ pub fn run_session_public(
 
     let displays = capture::enumerate_displays();
 
-    if !is_file_transfer {
+    if !is_file_transfer && !is_terminal {
         let mut display_infos = Vec::new();
         for d in &displays {
             let mut di = message_proto::DisplayInfo::new();
@@ -637,6 +651,7 @@ pub fn run_session_public(
 
     let mut features = message_proto::Features::new();
     features.privacy_mode = false;
+    features.terminal = cfg2_perms.get_option("enable-terminal") != "N";
     peer_info.features = protobuf::MessageField::some(features);
 
     let mut resp = message_proto::LoginResponse::new();
@@ -690,6 +705,17 @@ pub fn run_session_public(
         crate::config::write_log(&format!("[server] File transfer session"));
 
         let result = run_file_transfer_loop(stream, stop);
+        if let Ok(mut s) = CURRENT_CM_SESSION.lock() { *s = None; }
+        cm::signal_cm_ended(&cm_session_id);
+        cm::cleanup_cm_files(&cm_session_id);
+        rotate_password_if_needed();
+        return result;
+    }
+
+    if is_terminal {
+        crate::config::write_log(&format!("[server] Terminal session"));
+
+        let result = crate::terminal_service::run_terminal_loop(stream, stop);
         if let Ok(mut s) = CURRENT_CM_SESSION.lock() { *s = None; }
         cm::signal_cm_ended(&cm_session_id);
         cm::cleanup_cm_files(&cm_session_id);

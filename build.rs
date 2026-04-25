@@ -64,11 +64,6 @@ fn main() {
             .compile("bcrypt_shim");
     }
 
-    // FLS→TLS shim for XP compatibility:
-    // VS2022's static CRT calls FlsAlloc etc. through __imp__ import thunks (Vista+ only).
-    // fls_shim.c provides xp_FlsAlloc wrappers that call TlsAlloc (XP-safe).
-    // fls_imp.asm overrides the __imp__FlsAlloc@4 thunks to point to our wrappers,
-    // preventing the linker from importing FlsAlloc from kernel32.dll.
     #[cfg(target_os = "windows")]
     {
         cc::Build::new()
@@ -77,12 +72,6 @@ fn main() {
             .compile("fls_shim");
     }
 
-    // Force sciter.dll into the exe's import table (XP TLS workaround).
-    // sciter.dll uses __declspec(thread) TLS variables. On XP, DLLs loaded via
-    // LoadLibrary() with implicit TLS crash (access violation) because XP doesn't
-    // allocate TLS slots for dynamically loaded DLLs. By adding sciter.dll to the
-    // import table, it's loaded at process start where TLS works correctly.
-    // sciter-rs dyn_x86's LoadLibrary call still works (just returns existing handle).
     #[cfg(target_os = "windows")]
     {
         let def_path = std::path::Path::new(&out_dir).join("sciter.def");

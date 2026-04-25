@@ -19,58 +19,43 @@ var recording_enabled = true;
 var scroll_body = $(body);
 var auto_pan_enabled = true;
 var auto_pan_threshold = 30;
-var auto_pan_speed = 20;
+var auto_pan_base_speed = 4;
+var auto_pan_max_speed = 24;
+var auto_pan_max_accel = 4.0;
+var auto_pan_accel_ramp_ms = 1500;
 var auto_pan_timer = null;
 var auto_pan_dx = 0;
 var auto_pan_dy = 0;
+var auto_pan_start_time = 0;
+var auto_pan_proximity_x = 0.0;
+var auto_pan_proximity_y = 0.0;
 
 function shouldEnableAutoPan() {
-
     if (!display_width || !display_height) {
         return false;
     }
-
     var bw = $(body).box(#width, #border);
     var bh = $(body).box(#height, #border);
-
     if (view.windowState == View.WINDOW_FULL_SCREEN) {
         var (sx, sy, sw, sh) = view.screenBox(#frame, #rectw);
         bw = sw;
         bh = sh;
     }
-
     var scaled_width = display_width * display_scale;
     var scaled_height = display_height * display_scale;
-
-    var should_enable = (scaled_width > bw || scaled_height > bh);
-    return should_enable;
+    return (scaled_width > bw || scaled_height > bh);
 }
 
 function checkAutoPan(mouse_x, mouse_y) {
-
-    if (!auto_pan_enabled) {
-        stopAutoPan();
-        return;
-    }
-
-    if (display_cursor_embedded) {
-        stopAutoPan();
-        return;
-    }
-
+    if (!auto_pan_enabled) { stopAutoPan(); return; }
+    if (display_cursor_embedded) { stopAutoPan(); return; }
     if (is_file_transfer || is_port_forward || is_view_camera) {
-        stopAutoPan();
-        return;
+        stopAutoPan(); return;
     }
-
-    if (!shouldEnableAutoPan()) {
-        stopAutoPan();
-        return;
-    }
+    if (!shouldEnableAutoPan()) { stopAutoPan(); return; }
 
     var bw = $(body).box(#width, #border);
     var bh = $(body).box(#height, #border);
-
     if (view.windowState == View.WINDOW_FULL_SCREEN) {
         var (sx, sy, sw, sh) = view.screenBox(#frame, #rectw);
         bw = sw;
@@ -82,61 +67,81 @@ function checkAutoPan(mouse_x, mouse_y) {
 
     var scroll_x = scroll_body.scroll(#left) || 0;
     var scroll_y = scroll_body.scroll(#top) || 0;
-
     var viewport_mouse_x = mouse_x - scroll_x;
     var viewport_mouse_y = mouse_y - scroll_y;
 
-    var pan_x = 0;
-    var pan_y = 0;
+    var dir_x = 0;
+    var dir_y = 0;
+    var prox_x = 0.0;
+    var prox_y = 0.0;
 
     if (scaled_width > bw) {
         if (viewport_mouse_x < auto_pan_threshold) {
-            pan_x = -auto_pan_speed;
+            dir_x = -1;
+            prox_x = 1.0 - (viewport_mouse_x.toFloat() / auto_pan_threshold);
         } else if (viewport_mouse_x > bw - auto_pan_threshold) {
-            pan_x = auto_pan_speed;
+            dir_x = 1;
+            prox_x = 1.0 - ((bw - viewport_mouse_x).toFloat() / auto_pan_threshold);
         }
     }
 
     if (scaled_height > bh) {
         if (viewport_mouse_y < auto_pan_threshold) {
-            pan_y = -auto_pan_speed;
+            dir_y = -1;
+            prox_y = 1.0 - (viewport_mouse_y.toFloat() / auto_pan_threshold);
         } else if (viewport_mouse_y > bh - auto_pan_threshold) {
-            pan_y = auto_pan_speed;
+            dir_y = 1;
+            prox_y = 1.0 - ((bh - viewport_mouse_y).toFloat() / auto_pan_threshold);
         }
     }
 
-    if (pan_x != 0 || pan_y != 0) {
-        startAutoPan(pan_x, pan_y);
+    if (prox_x < 0.0) prox_x = 0.0;
+    if (prox_x > 1.0) prox_x = 1.0;
+    if (prox_y < 0.0) prox_y = 0.0;
+    if (prox_y > 1.0) prox_y = 1.0;
+
+    if (dir_x != 0 || dir_y != 0) {
+        startAutoPan(dir_x, dir_y, prox_x, prox_y);
     } else {
         stopAutoPan();
     }
 }
 
-function startAutoPan(dx, dy) {
-    auto_pan_dx = dx;
-    auto_pan_dy = dy;
+function startAutoPan(dir_x, dir_y, prox_x, prox_y) {
+    auto_pan_dx = dir_x;
+    auto_pan_dy = dir_y;
+    auto_pan_proximity_x = prox_x;
+    auto_pan_proximity_y = prox_y;
 
     if (auto_pan_timer) {
         return;
     }
 
+    auto_pan_start_time = getTime();
+
     auto_pan_timer = self.timer(16ms, function() {
-        if (!auto_pan_enabled) {
-            stopAutoPan();
-            return false;
-        }
+        if (!auto_pan_enabled) { stopAutoPan(); return false; }
+
+        var elapsed = getTime() - auto_pan_start_time;
+        var time_ratio = elapsed / auto_pan_accel_ramp_ms;
+        if (time_ratio > 1.0) time_ratio = 1.0;
+        var time_factor = 1.0 + (auto_pan_max_accel - 1.0) * time_ratio;
+
+        var speed_x = auto_pan_base_speed + (auto_pan_max_speed - auto_pan_base_speed) * auto_pan_proximity_x;
+        var speed_y = auto_pan_base_speed + (auto_pan_max_speed - auto_pan_base_speed) * auto_pan_proximity_y;
+
+        var move_x = (auto_pan_dx * speed_x * time_factor).toInteger();
+        var move_y = (auto_pan_dy * speed_y * time_factor).toInteger();
 
         var current_x = scroll_body.scroll(#left) || 0;
         var current_y = scroll_body.scroll(#top) || 0;
-
-        var new_x = current_x + auto_pan_dx;
-        var new_y = current_y + auto_pan_dy;
+        var new_x = current_x + move_x;
+        var new_y = current_y + move_y;
 
         var body_width = $(body).box(#width, #border);
         var body_height = $(body).box(#height, #border);
         var content_width = handler.box(#width, #border);
         var content_height = handler.box(#height, #border);
-
         var max_scroll_x = content_width - body_width;
         var max_scroll_y = content_height - body_height;
 
@@ -159,6 +164,9 @@ function stopAutoPan() {
     }
     auto_pan_dx = 0;
     auto_pan_dy = 0;
+    auto_pan_proximity_x = 0.0;
+    auto_pan_proximity_y = 0.0;
+    auto_pan_start_time = 0;
 }
 
 handler.setDisplay = function(x, y, w, h, cursor_embedded) {

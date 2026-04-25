@@ -210,6 +210,10 @@ impl RemoteHandler {
     }
 
     fn set_write_override(&mut self, id: i32, file_num: i32, need_override: bool, remember: bool, is_upload: bool) {
+        crate::config::write_log(&format!(
+            "[remote_handler] set_write_override: id={} file_num={} need_override={} remember={} is_upload={}",
+            id, file_num, need_override, remember, is_upload
+        ));
         let mut confirm = message_proto::FileTransferSendConfirmRequest::new();
         confirm.id = id;
         confirm.file_num = file_num;

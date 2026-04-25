@@ -799,8 +799,7 @@ pub fn get_hostname() -> String {
 }
 
 pub fn is_installed() -> bool {
-
-    false
+    crate::install::is_installed()
 }
 
 extern "system" {

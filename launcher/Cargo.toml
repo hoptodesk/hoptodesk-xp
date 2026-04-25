@@ -1,0 +1,23 @@
+[package]
+name = "hoptodesk-xp-launcher"
+version = "1.45.20"
+authors = ["hoptodesk <info@hoptodesk.com>"]
+edition = "2021"
+build = "build.rs"
+description = "A remote control software."
+
+[[bin]]
+name = "hoptodesk-xp-launcher"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+cc = "1.0"
+winres = "0.1"
+
+[package.metadata.winres]
+LegalCopyright = "Copyright © 2026 Begonia Holdings.  Copyright © 2026 Purslane Ltd."
+ProductName = "HopToDesk"
+FileDescription = "HopToDesk"
+CompanyName = "Begonia Holdings"
+OriginalFilename = "HopToDesk.exe"
+InternalName = "HopToDesk"

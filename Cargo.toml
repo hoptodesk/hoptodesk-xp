@@ -1,8 +1,12 @@
+[workspace]
+members = ["launcher"]
+
 [package]
 name = "hoptodesk"
 version = "1.45.20"
 authors = ["hoptodesk <info@hoptodesk.com>"]
 edition = "2021"
+rust-version = "1.75"
 build = "build.rs"
 description = "A remote control software."
 default-run = "hoptodesk"
@@ -31,6 +35,8 @@ winapi = { version = "0.3", features = [
     "wincon",
     "fileapi",
     "wincrypt",
+    "winsvc",
+    "winerror",
 ] }
 sciter-rs = { path = "rust-sciter" }
 protobuf = { version = "3.7", features = ["with-bytes"] }

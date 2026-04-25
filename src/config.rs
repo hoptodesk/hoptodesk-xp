@@ -49,7 +49,42 @@ pub struct LocalConfig {
     path: PathBuf,
 }
 
+fn shared_app_dir() -> Option<PathBuf> {
+    if let Ok(pd) = std::env::var("ProgramData") {
+        let dir = PathBuf::from(pd).join(APP_NAME);
+        if ensure_dir(&dir) {
+            return Some(dir);
+        }
+    }
+    if let Ok(au) = std::env::var("ALLUSERSPROFILE") {
+        let dir = PathBuf::from(au).join("Application Data").join(APP_NAME);
+        if ensure_dir(&dir) {
+            return Some(dir);
+        }
+    }
+    let xp_default = PathBuf::from(
+        "C:\\Documents and Settings\\All Users\\Application Data",
+    )
+    .join(APP_NAME);
+    if ensure_dir(&xp_default) {
+        return Some(xp_default);
+    }
+    None
+}
+
+fn installed_marker_exists() -> bool {
+    let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into());
+    PathBuf::from(pf).join(APP_NAME).join("HopToDesk.exe").exists()
+}
+
 pub fn app_dir() -> PathBuf {
+    if installed_marker_exists() {
+        if let Some(shared) = shared_app_dir() {
+            if shared.join("config").exists() {
+                return shared;
+            }
+        }
+    }
 
     if let Ok(appdata) = std::env::var("APPDATA") {
         let dir = PathBuf::from(appdata).join(APP_NAME);
@@ -74,6 +109,10 @@ pub fn app_dir() -> PathBuf {
     }
 
     PathBuf::from(".")
+}
+
+pub fn shared_app_dir_pub() -> Option<PathBuf> {
+    shared_app_dir()
 }
 
 pub fn config_dir() -> PathBuf {
@@ -580,7 +619,6 @@ fn generate_password() -> String {
 }
 
 pub fn generate_random_bytes(len: usize) -> Vec<u8> {
-    // Try CSRNG first, fall back to LCG
     if let Some(bytes) = generate_secure_random_bytes(len) {
         return bytes;
     }
@@ -706,7 +744,6 @@ pub fn migrate_old_config() {
 }
 
 fn generate_key_pair() -> (Vec<u8>, Vec<u8>) {
-    // Generate Ed25519 signing keypair from 32-byte random seed
     let seed_vec = generate_random_bytes(32);
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&seed_vec);

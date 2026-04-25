@@ -107,7 +107,6 @@ fn discover_signal_server() -> Result<(String, u16), String> {
     crate::config::write_log("[signal] Discovering signal server...");
     match api_get() {
         Ok(body) => {
-            crate::config::write_log(&format!("[signal] API response: {}", &body[..body.len().min(300)]));
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                 if let Some(obj) = json.get("rendezvous").and_then(|v| v.as_object()) {
                     let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or("");

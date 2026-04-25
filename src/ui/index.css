@@ -51,8 +51,11 @@ svg#settings-gear {
     background: none;
 }
 
-svg#settings-gear:hover {
+svg#settings-gear:hover, svg#settings-gear:focus {
     color: #1E3A5F;
+    outline: 1px solid #2C8CFF;
+    outline-offset: 2px;
+    border-radius: 4px;
 }
 
 .main-content {
@@ -128,8 +131,9 @@ svg#settings-gear:hover {
     margin-left: 8px;
 }
 
-.copy-pill:hover {
+.copy-pill:hover, .copy-pill:focus {
     background: #BBDEFB;
+    outline: 1px solid #2C8CFF;
 }
 
 .copy-pill svg {
@@ -152,14 +156,39 @@ svg#settings-gear:hover {
     font-weight: 700;
 }
 
-.invite-pill:hover {
+.invite-pill:hover, .invite-pill:focus {
     background: #D0E3FF;
+    outline: 1px solid #2C8CFF;
 }
 
 .invite-pill svg {
     width: 12px;
     height: 12px;
     color: #2C8CFF;
+    vertical-align: middle;
+}
+
+.unlink-pill {
+    flow: horizontal;
+    vertical-align: middle;
+    border-spacing: 4px;
+    background: #E3F2FD;
+    border-radius: 12px;
+    padding: 3px 12px 3px 9px;
+    cursor: pointer;
+    font-size: 0.85em;
+    color: #1565C0;
+    font-weight: 700;
+}
+
+.unlink-pill:hover {
+    background: #BBDEFB;
+}
+
+.unlink-pill svg {
+    width: 12px;
+    height: 12px;
+    color: #1565C0;
     vertical-align: middle;
 }
 
@@ -903,8 +932,11 @@ html.darktheme svg#settings-gear {
     color: #64748B;
 }
 
-html.darktheme svg#settings-gear:hover {
+html.darktheme svg#settings-gear:hover, html.darktheme svg#settings-gear:focus {
     color: #E2E8F0;
+    outline: 1px solid #60A5FA;
+    outline-offset: 2px;
+    border-radius: 4px;
 }
 
 html.darktheme .card-device, html.darktheme .card-remote {
@@ -1024,8 +1056,9 @@ html.darktheme .copy-pill {
     color: #60A5FA;
 }
 
-html.darktheme .copy-pill:hover {
+html.darktheme .copy-pill:hover, html.darktheme .copy-pill:focus {
     background: #254A73;
+    outline: 1px solid #60A5FA;
 }
 
 html.darktheme .copy-pill svg {
@@ -1037,11 +1070,25 @@ html.darktheme .invite-pill {
     color: #60A5FA;
 }
 
-html.darktheme .invite-pill:hover {
+html.darktheme .invite-pill:hover, html.darktheme .invite-pill:focus {
     background: #254A73;
+    outline: 1px solid #60A5FA;
 }
 
 html.darktheme .invite-pill svg {
+    color: #60A5FA;
+}
+
+html.darktheme .unlink-pill {
+    background: #1E3A5F;
+    color: #60A5FA;
+}
+
+html.darktheme .unlink-pill:hover {
+    background: #254A73;
+}
+
+html.darktheme .unlink-pill svg {
     color: #60A5FA;
 }
 
@@ -1180,7 +1227,7 @@ popup[role="tooltip"] {
     vertical-align: middle;
 }
 
-#ticket-icon:hover {
+#ticket-icon:hover, #ticket-icon:focus {
     color: #0056b3;
 }
 
