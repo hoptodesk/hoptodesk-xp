@@ -4,7 +4,7 @@
 
 ![HopToDesk on Windows XP](https://www.hoptodesk.com/img/hoptodesk-windows-xp.png)
 
-HopToDesk for Windows XP is a free, fast, and lightweight remote desktop application designed to run on **Windows XP SP3 and later (32-bit)**. Built in Rust for performance and reliability, it brings modern remote access capabilities to legacy Windows systems that most remote desktop software no longer supports.
+HopToDesk for Windows XP is a free, fast, and lightweight remote desktop application designed to run on **Windows XP SP2 and later, both 32-bit and 64-bit**. Built in Rust for performance and reliability, it brings modern remote access capabilities to legacy Windows systems that most remote desktop software no longer supports.
 
 This is a separate project from the main [HopToDesk project on GitLab](https://gitlab.com/hoptodesk/hoptodesk) due to the unique requirements of maintaining software on older versions of Windows. For the full cross-platform version (Windows 7+, macOS, Linux), visit [hoptodesk.com](https://www.hoptodesk.com).
 
@@ -21,11 +21,21 @@ This is a separate project from the main [HopToDesk project on GitLab](https://g
 
 ## Requirements
 
-- Windows XP SP3 or later (32-bit)
+- Windows XP SP2 or later (32-bit or 64-bit; runs on Windows XP Professional x64 Edition via WOW64)
 - Minimal RAM and disk usage
 - No installation required — runs as a portable executable
 
 ## Download
 
 Get the latest version at [hoptodesk.com](https://www.hoptodesk.com/)
+
+## Build
+
+Requires the [rust9x](https://github.com/rust9x/rust) toolchain to target XP.
+
+```
+cargo +rust9x build --release --target i686-rust9x-windows-msvc
+```
+
+The output is `target/i686-rust9x-windows-msvc/release/hoptodesk.exe`.
 

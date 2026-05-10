@@ -201,12 +201,6 @@ fn run_client_inner(
         Some(message_proto::message::Union::SignedId(signed_id)) => {
             crate::config::write_log("[client] Got SignedId, attempting key exchange");
 
-            // Parse IdPk from the SignedId to get server's ephemeral public key.
-            // NOTE: Ed25519 signature is NOT verified here — XP client lacks verify impl.
-            // This means a MITM could substitute the ephemeral pk. Encryption still protects
-            // against passive eavesdropping. Full auth requires adding Ed25519 verify.
-            // XP server: signed_id.id = 64-byte Ed25519 signature + protobuf IdPk bytes
-            // Normal server: signed_id.id = 64-byte Ed25519 signature + protobuf IdPk bytes
             let mut server_pk = [0u8; 32];
             let mut has_server_pk = false;
             if let Ok(id_pk) = message_proto::IdPk::parse_from_bytes(&signed_id.id) {
@@ -216,7 +210,7 @@ fn run_client_inner(
                 }
             }
             if !has_server_pk && signed_id.id.len() > 64 {
-                // Try skipping 64-byte Ed25519 signature prefix (normal server)
+
                 if let Ok(id_pk) = message_proto::IdPk::parse_from_bytes(&signed_id.id[64..]) {
                     if id_pk.pk.len() == 32 {
                         server_pk.copy_from_slice(&id_pk.pk);
@@ -226,19 +220,16 @@ fn run_client_inner(
             }
 
             if has_server_pk {
-                // Generate our ephemeral Curve25519 keypair
+
                 let (our_sk, our_pk) = crate::crypto::x25519_keypair();
 
-                // Generate random 32-byte symmetric key
                 let sym_key_vec = crate::config::generate_random_bytes(32);
                 let mut sym_key = [0u8; 32];
                 sym_key.copy_from_slice(&sym_key_vec);
 
-                // Encrypt symmetric key with crypto_box using server's pk
                 let nonce = [0u8; 24];
                 let sealed = crate::crypto::crypto_box_seal(&server_pk, &our_sk, &nonce, &sym_key);
 
-                // Send PublicKey with our pk and sealed symmetric key
                 let mut pk_msg = message_proto::PublicKey::new();
                 pk_msg.asymmetric_value = our_pk.to_vec().into();
                 pk_msg.symmetric_value = sealed.into();
@@ -246,11 +237,10 @@ fn run_client_inner(
                 msg.set_public_key(pk_msg);
                 stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
 
-                // Enable encryption for all subsequent messages
                 stream.set_key(sym_key);
                 crate::config::write_log("[client] Encryption established");
             } else {
-                // Server didn't send a valid pk, fall back to unencrypted
+
                 crate::config::write_log("[client] No server pk, sending empty PublicKey (no encryption)");
                 let pk = message_proto::PublicKey::new();
                 let mut msg = message_proto::Message::new();
@@ -390,22 +380,18 @@ fn run_client_inner(
         }
     }
 
-    // Handle login response — may need to wait for remote acceptance
     let final_peer_info: Option<message_proto::PeerInfo>;
     match login_resp.union {
         Some(message_proto::login_response::Union::Error(ref e))
             if e == "No Password Access" =>
         {
-            // Remote side has no password set — wait for them to click Accept/Reject.
-            // Do NOT disconnect; the server will send a new LoginResponse with PeerInfo
-            // when the remote user accepts, or a CloseReason if they reject.
+
             crate::config::write_log("[client] No Password Access — waiting for remote acceptance...");
             if let Ok(mut state) = client_state.lock() {
                 state.status = "waiting".into();
                 state.error = "Waiting for remote acceptance...".into();
             }
 
-            // Wait up to 60 seconds for remote accept/reject
             stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
             let accept_deadline = Instant::now() + Duration::from_secs(60);
             let mut accepted = false;
@@ -497,7 +483,6 @@ fn run_client_inner(
         }
     }
 
-    // Process PeerInfo (from direct login or after remote acceptance)
     if let Some(pi) = final_peer_info {
             crate::config::write_log(&format!(
                 "[client] Login OK! Peer: {} ({}) - {} displays",
@@ -595,7 +580,7 @@ fn run_client_inner(
 
         if last_clipboard_check.elapsed() >= Duration::from_millis(500) {
             last_clipboard_check = Instant::now();
-            // Check for file clipboard first (CF_HDROP takes priority)
+
             if let Some(msg) = crate::clipboard_file::check_clipboard_files_change() {
                 if let Ok(mut s) = stream.lock() {
                     if let Ok(bytes) = msg.write_to_bytes() {
@@ -772,7 +757,7 @@ fn handle_video_frame(
             }
             let dec = decoder.as_mut().unwrap();
             for frame in &frames.frames {
-                // Write raw VP8 frame to recorder if recording
+
                 if let Ok(mut state) = client_state.lock() {
                     if state.recording {
                         let keyframe = frame.key;

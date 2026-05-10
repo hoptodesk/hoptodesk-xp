@@ -83,7 +83,7 @@ fn current_time() -> u64 {
 
 pub fn verify_code(secret: &[u8], code: &str) -> bool {
     let time = current_time();
-    // Check current period and ±1 window for clock skew
+
     for offset in [0i64, -1, 1] {
         let t = (time as i64 + offset * PERIOD as i64) as u64;
         if generate_totp(secret, t) == code {
@@ -116,7 +116,7 @@ fn load_secret() -> Option<Vec<u8>> {
     }
     let encrypted = base32_decode(&encoded)?;
     let secret = xor_encrypt(&encrypted, "hoptodesk-2fa-key");
-    // Verify it's a valid TOTP secret (should be 20 bytes for SHA1)
+
     if secret.len() < 10 || secret.len() > 64 {
         return None;
     }
@@ -135,7 +135,7 @@ pub fn generate2fa() -> String {
     let rng = ring::rand::SystemRandom::new();
     if let Err(e) = ring::rand::SecureRandom::fill(&rng, &mut secret) {
         config::write_log(&format!("[2FA] ring random failed: {}, using fallback", e));
-        // Fallback: use system time + pointer as entropy
+
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
@@ -184,7 +184,6 @@ pub fn get_2fa_secret() -> Option<Vec<u8>> {
     load_secret()
 }
 
-/// Generate a QR code BMP image as a base64 data URI string.
 pub fn generate_qr_data_uri(data: &str) -> String {
     use qrcode::QrCode;
     let code = match QrCode::new(data.as_bytes()) {
@@ -196,46 +195,41 @@ pub fn generate_qr_data_uri(data: &str) -> String {
     };
     let matrix = code.to_colors();
     let width = code.width();
-    let scale = 4; // pixels per module
-    let border = 4; // quiet zone modules
+    let scale = 4;
+    let border = 4;
     let img_w = (width + border * 2) * scale;
     let img_h = img_w;
 
-    // Generate 1-bit BMP
-    let row_bytes = ((img_w + 31) / 32) * 4; // rows padded to 4-byte boundary
+    let row_bytes = ((img_w + 31) / 32) * 4;
     let pixel_data_size = row_bytes * img_h;
-    let file_size = 14 + 40 + 8 + pixel_data_size; // header + DIB + color table + pixels
+    let file_size = 14 + 40 + 8 + pixel_data_size;
 
     let mut bmp = Vec::with_capacity(file_size);
 
-    // BMP file header (14 bytes)
     bmp.extend_from_slice(b"BM");
     bmp.extend_from_slice(&(file_size as u32).to_le_bytes());
-    bmp.extend_from_slice(&[0u8; 4]); // reserved
-    bmp.extend_from_slice(&62u32.to_le_bytes()); // pixel data offset = 14+40+8
+    bmp.extend_from_slice(&[0u8; 4]);
+    bmp.extend_from_slice(&62u32.to_le_bytes());
 
-    // DIB header (BITMAPINFOHEADER, 40 bytes)
-    bmp.extend_from_slice(&40u32.to_le_bytes()); // header size
-    bmp.extend_from_slice(&(img_w as i32).to_le_bytes()); // width
-    bmp.extend_from_slice(&(img_h as i32).to_le_bytes()); // height (positive = bottom-up)
-    bmp.extend_from_slice(&1u16.to_le_bytes()); // color planes
-    bmp.extend_from_slice(&1u16.to_le_bytes()); // bits per pixel
-    bmp.extend_from_slice(&0u32.to_le_bytes()); // compression (none)
+    bmp.extend_from_slice(&40u32.to_le_bytes());
+    bmp.extend_from_slice(&(img_w as i32).to_le_bytes());
+    bmp.extend_from_slice(&(img_h as i32).to_le_bytes());
+    bmp.extend_from_slice(&1u16.to_le_bytes());
+    bmp.extend_from_slice(&1u16.to_le_bytes());
+    bmp.extend_from_slice(&0u32.to_le_bytes());
     bmp.extend_from_slice(&(pixel_data_size as u32).to_le_bytes());
-    bmp.extend_from_slice(&2835u32.to_le_bytes()); // h resolution (72 DPI)
-    bmp.extend_from_slice(&2835u32.to_le_bytes()); // v resolution
-    bmp.extend_from_slice(&2u32.to_le_bytes()); // colors in palette
-    bmp.extend_from_slice(&0u32.to_le_bytes()); // important colors
+    bmp.extend_from_slice(&2835u32.to_le_bytes());
+    bmp.extend_from_slice(&2835u32.to_le_bytes());
+    bmp.extend_from_slice(&2u32.to_le_bytes());
+    bmp.extend_from_slice(&0u32.to_le_bytes());
 
-    // Color table: index 0 = black (dark module), index 1 = white (light)
-    bmp.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // black
-    bmp.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0x00]); // white
+    bmp.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+    bmp.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0x00]);
 
-    // Pixel data (bottom-up rows)
     for y in (0..img_h).rev() {
         let mut row = vec![0u8; row_bytes];
         for x in 0..img_w {
-            // Avoid negative integer division (Rust truncates toward zero, not floor)
+
             let px = x as isize - (border * scale) as isize;
             let py = y as isize - (border * scale) as isize;
             let is_dark = if px >= 0 && py >= 0 {
@@ -243,10 +237,10 @@ pub fn generate_qr_data_uri(data: &str) -> String {
                 let my = py as usize / scale;
                 mx < width && my < width && matrix[my * width + mx] == qrcode::Color::Dark
             } else {
-                false // quiet zone is white
+                false
             };
             if !is_dark {
-                // Set bit to 1 (white) — in 1-bit BMP, bit=1 maps to color index 1
+
                 let byte_idx = x / 8;
                 let bit_idx = 7 - (x % 8);
                 row[byte_idx] |= 1 << bit_idx;

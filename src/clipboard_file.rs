@@ -18,7 +18,6 @@ const FD_PROGRESSUI: u32 = 0x4000;
 const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 
-// FILEDESCRIPTORW struct size (Windows)
 const FD_STRUCT_SIZE: usize = 592;
 
 struct ClipFileEntry {
@@ -28,7 +27,6 @@ struct ClipFileEntry {
     is_dir: bool,
 }
 
-// State for receiving files from remote
 struct RecvState {
     files: Vec<RecvFileEntry>,
     current_index: usize,
@@ -118,25 +116,19 @@ fn enumerate_dir_recursive(dir_path: &str, rel_prefix: &str, entries: &mut Vec<C
     }
 }
 
-// Build FILEGROUPDESCRIPTORW binary data from current file list
 fn build_file_group_descriptor(files: &[ClipFileEntry]) -> Vec<u8> {
     let total_size = 4 + files.len() * FD_STRUCT_SIZE;
     let mut data = vec![0u8; total_size];
 
-    // cItems (u32 LE)
     let count = files.len() as u32;
     data[0..4].copy_from_slice(&count.to_le_bytes());
 
     for (i, file) in files.iter().enumerate() {
         let offset = 4 + i * FD_STRUCT_SIZE;
 
-        // dwFlags
         let flags = FD_ATTRIBUTES | FD_FILESIZE | FD_PROGRESSUI;
         data[offset..offset + 4].copy_from_slice(&flags.to_le_bytes());
 
-        // Skip clsid (16 bytes at offset+4), sizel (8 bytes at offset+20), pointl (8 bytes at offset+28)
-
-        // dwFileAttributes at offset+36
         let attrs = if file.is_dir {
             FILE_ATTRIBUTE_DIRECTORY
         } else {
@@ -144,30 +136,24 @@ fn build_file_group_descriptor(files: &[ClipFileEntry]) -> Vec<u8> {
         };
         data[offset + 36..offset + 40].copy_from_slice(&attrs.to_le_bytes());
 
-        // Skip ftCreationTime (8 at offset+40), ftLastAccessTime (8 at offset+48), ftLastWriteTime (8 at offset+56)
-
-        // nFileSizeHigh at offset+64
         let size_high = (file.size >> 32) as u32;
         data[offset + 64..offset + 68].copy_from_slice(&size_high.to_le_bytes());
 
-        // nFileSizeLow at offset+68
         let size_low = file.size as u32;
         data[offset + 68..offset + 72].copy_from_slice(&size_low.to_le_bytes());
 
-        // cFileName at offset+72, 260 u16 chars (520 bytes)
         let wide: Vec<u16> = file.rel_name.encode_utf16().collect();
         let max_chars = std::cmp::min(wide.len(), 259);
         for j in 0..max_chars {
             let byte_offset = offset + 72 + j * 2;
             data[byte_offset..byte_offset + 2].copy_from_slice(&wide[j].to_le_bytes());
         }
-        // null terminator already there (zeroed buffer)
+
     }
 
     data
 }
 
-// Parse FILEGROUPDESCRIPTORW binary data into file entries
 fn parse_file_group_descriptor(data: &[u8]) -> Vec<RecvFileEntry> {
     if data.len() < 4 {
         return Vec::new();
@@ -203,7 +189,6 @@ fn parse_file_group_descriptor(data: &[u8]) -> Vec<RecvFileEntry> {
         ]) as u64;
         let size = (size_high << 32) | size_low;
 
-        // Parse filename (u16 LE, null-terminated, max 260 chars)
         let name_offset = offset + 72;
         let mut name_chars = Vec::new();
         for j in 0..260 {
@@ -225,10 +210,6 @@ fn parse_file_group_descriptor(data: &[u8]) -> Vec<RecvFileEntry> {
     entries
 }
 
-// --- Public API for server (host) side ---
-
-/// Check if clipboard has files and if they changed since last check.
-/// Returns a FormatList message if new files detected.
 pub fn check_clipboard_files_change() -> Option<message_proto::Message> {
     let paths = platform::get_clipboard_file_paths()?;
     if paths.is_empty() {
@@ -250,7 +231,6 @@ pub fn check_clipboard_files_change() -> Option<message_proto::Message> {
 
     *CLIP_FILES.lock().unwrap() = files;
 
-    // Build FormatList message
     let mut format_list = message_proto::CliprdrServerFormatList::new();
     let mut fmt1 = message_proto::CliprdrFormat::new();
     fmt1.id = FILEDESCRIPTOR_FORMAT_ID;
@@ -267,12 +247,10 @@ pub fn check_clipboard_files_change() -> Option<message_proto::Message> {
     Some(msg)
 }
 
-/// Handle incoming Cliprdr message (server/host side).
-/// Returns response messages to send back.
 pub fn handle_cliprdr_host(cliprdr: &message_proto::Cliprdr) -> Vec<message_proto::Message> {
     match &cliprdr.union {
         Some(message_proto::cliprdr::Union::FormatListResponse(_)) => {
-            // Remote acknowledged our format list, nothing to do
+
             vec![]
         }
         Some(message_proto::cliprdr::Union::FormatDataRequest(req)) => {
@@ -282,7 +260,7 @@ pub fn handle_cliprdr_host(cliprdr: &message_proto::Cliprdr) -> Vec<message_prot
             handle_file_contents_request(req)
         }
         Some(message_proto::cliprdr::Union::FormatList(fl)) => {
-            // Remote is announcing files — respond with FormatListResponse + FormatDataRequest
+
             handle_incoming_format_list(fl)
         }
         Some(message_proto::cliprdr::Union::FormatDataResponse(resp)) => {
@@ -295,12 +273,10 @@ pub fn handle_cliprdr_host(cliprdr: &message_proto::Cliprdr) -> Vec<message_prot
     }
 }
 
-/// Handle incoming Cliprdr message (client/viewer side).
-/// Returns response messages to send back.
 pub fn handle_cliprdr_client(cliprdr: &message_proto::Cliprdr) -> Vec<message_proto::Message> {
     match &cliprdr.union {
         Some(message_proto::cliprdr::Union::FormatList(fl)) => {
-            // Host is announcing files
+
             handle_incoming_format_list(fl)
         }
         Some(message_proto::cliprdr::Union::FormatListResponse(_)) => {
@@ -380,12 +356,10 @@ fn read_file_chunk(path: &str, offset: u64, size: usize) -> Result<Vec<u8>, std:
     Ok(buf)
 }
 
-// --- Receiving files (both host and client side) ---
-
 fn handle_incoming_format_list(
     fl: &message_proto::CliprdrServerFormatList,
 ) -> Vec<message_proto::Message> {
-    // Check if the format list contains file formats
+
     let has_fd = fl.formats.iter().any(|f| {
         f.format == FILEDESCRIPTORW_FORMAT_NAME || f.id == FILEDESCRIPTOR_FORMAT_ID
     });
@@ -394,7 +368,6 @@ fn handle_incoming_format_list(
         return vec![make_format_list_response(0x1)];
     }
 
-    // Find the file descriptor format ID from the list
     let fd_id = fl
         .formats
         .iter()
@@ -402,7 +375,6 @@ fn handle_incoming_format_list(
         .map(|f| f.id)
         .unwrap_or(FILEDESCRIPTOR_FORMAT_ID);
 
-    // Send FormatListResponse + FormatDataRequest
     vec![
         make_format_list_response(0x1),
         make_format_data_request(fd_id),
@@ -421,7 +393,6 @@ fn handle_format_data_response(
         return vec![];
     }
 
-    // Create temp directory for received files
     let temp_dir = format!(
         "{}\\hoptodesk_clip_{}",
         std::env::temp_dir().to_string_lossy().trim_end_matches('\\'),
@@ -432,7 +403,6 @@ fn handle_format_data_response(
     );
     let _ = std::fs::create_dir_all(&temp_dir);
 
-    // Create subdirectories for directory entries
     for entry in &entries {
         if entry.is_dir {
             let dir_path = format!("{}\\{}", temp_dir, entry.name.replace('/', "\\"));
@@ -440,7 +410,6 @@ fn handle_format_data_response(
         }
     }
 
-    // Find first non-directory file to request
     let first_file_index = entries.iter().position(|e| !e.is_dir);
 
     let mut state = RecvState {
@@ -456,7 +425,7 @@ fn handle_format_data_response(
         *RECV_STATE.lock().unwrap() = Some(state);
         vec![msg]
     } else {
-        // Only directories, finalize
+
         finalize_received_files(&state);
         *RECV_STATE.lock().unwrap() = None;
         vec![]
@@ -473,7 +442,7 @@ fn handle_file_contents_response(
     };
 
     if resp.msg_flags != 0x1 {
-        // Error — skip this file, try next
+
         return advance_to_next_file(state);
     }
 
@@ -485,7 +454,7 @@ fn handle_file_contents_response(
     }
 
     if state.waiting_size {
-        // Got size response — now request file data
+
         if resp.requested_data.len() >= 8 {
             let size_low = u32::from_le_bytes([
                 resp.requested_data[0],
@@ -505,7 +474,7 @@ fn handle_file_contents_response(
         state.current_offset = 0;
 
         if state.files[idx].size == 0 || state.files[idx].is_dir {
-            // Empty file or directory, create and advance
+
             if !state.files[idx].is_dir {
                 let path = format!(
                     "{}\\{}",
@@ -517,7 +486,6 @@ fn handle_file_contents_response(
             return advance_to_next_file(state);
         }
 
-        // Request first chunk (up to 4MB)
         let chunk_size = std::cmp::min(state.files[idx].size, 4 * 1024 * 1024) as i32;
         vec![make_file_contents_request(
             idx as i32,
@@ -526,14 +494,13 @@ fn handle_file_contents_response(
             chunk_size,
         )]
     } else {
-        // Got file data chunk — write to disk
+
         let file_path = format!(
             "{}\\{}",
             state.temp_dir,
             state.files[idx].name.replace('/', "\\")
         );
 
-        // Ensure parent directory exists
         if let Some(parent) = std::path::Path::new(&file_path).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -555,11 +522,10 @@ fn handle_file_contents_response(
         state.current_offset += resp.requested_data.len() as u64;
 
         if state.current_offset >= state.files[idx].size {
-            // File complete, advance to next
+
             return advance_to_next_file(state);
         }
 
-        // Request next chunk
         let remaining = state.files[idx].size - state.current_offset;
         let chunk_size = std::cmp::min(remaining, 4 * 1024 * 1024) as i32;
         let pos_low = state.current_offset as i32;
@@ -575,7 +541,7 @@ fn handle_file_contents_response(
 }
 
 fn advance_to_next_file(state: &mut RecvState) -> Vec<message_proto::Message> {
-    // Find next non-directory file
+
     let next = state
         .files
         .iter()
@@ -592,7 +558,7 @@ fn advance_to_next_file(state: &mut RecvState) -> Vec<message_proto::Message> {
             vec![make_file_contents_request(idx as i32, FILECONTENTS_SIZE, 0, 8)]
         }
         None => {
-            // All files received
+
             finalize_received_files(state);
             vec![]
         }
@@ -600,10 +566,10 @@ fn advance_to_next_file(state: &mut RecvState) -> Vec<message_proto::Message> {
 }
 
 fn finalize_received_files(state: &RecvState) {
-    // Collect top-level file paths
+
     let mut top_level_paths = Vec::new();
     for entry in &state.files {
-        // Top-level entries have no backslash in name
+
         if !entry.name.contains('\\') {
             let path = format!("{}\\{}", state.temp_dir, entry.name);
             top_level_paths.push(path);
@@ -615,14 +581,11 @@ fn finalize_received_files(state: &RecvState) {
     }
 }
 
-// Reset file tracking (call when session ends)
 pub fn reset() {
     *CLIP_FILES.lock().unwrap() = Vec::new();
     *LAST_FILE_PATHS.lock().unwrap() = Vec::new();
     *RECV_STATE.lock().unwrap() = None;
 }
-
-// --- Message builders ---
 
 fn make_format_list_response(flags: i32) -> message_proto::Message {
     let mut resp = message_proto::CliprdrServerFormatListResponse::new();
@@ -686,7 +649,7 @@ fn make_file_contents_request_full(
     cb_requested: i32,
 ) -> message_proto::Message {
     let mut req = message_proto::CliprdrFileContentsRequest::new();
-    req.stream_id = list_index; // use list_index as stream_id for simplicity
+    req.stream_id = list_index;
     req.list_index = list_index;
     req.dw_flags = dw_flags;
     req.n_position_low = n_position_low;

@@ -1,7 +1,4 @@
 
-//! Minimal session recording — saves VP8 frames to a WebM file.
-//! WebM is a subset of Matroska (EBML) containing VP8 video.
-
 use std::io::{self, Write};
 use std::fs::File;
 use std::path::PathBuf;
@@ -16,7 +13,6 @@ pub struct Recorder {
     frame_count: u64,
 }
 
-// EBML helper: write a variable-length integer (VINT)
 fn write_vint(buf: &mut Vec<u8>, val: u64) {
     if val < 0x7F {
         buf.push(0x80 | val as u8);
@@ -33,7 +29,7 @@ fn write_vint(buf: &mut Vec<u8>, val: u64) {
         buf.push((val >> 8) as u8);
         buf.push(val as u8);
     } else {
-        // 8-byte VINT for unknown size
+
         buf.extend_from_slice(&[0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
     }
 }
@@ -108,7 +104,6 @@ fn write_master_element(buf: &mut Vec<u8>, id: u32, content: &[u8]) {
     buf.extend_from_slice(content);
 }
 
-// EBML element IDs
 const EBML: u32 = 0x1A45DFA3;
 const EBML_VERSION: u32 = 0x4286;
 const EBML_READ_VERSION: u32 = 0x42F7;
@@ -148,7 +143,6 @@ impl Recorder {
 
         let mut file = File::create(&path)?;
 
-        // Write EBML header
         let mut ebml_content = Vec::new();
         write_uint_element(&mut ebml_content, EBML_VERSION, 1);
         write_uint_element(&mut ebml_content, EBML_READ_VERSION, 1);
@@ -162,16 +156,14 @@ impl Recorder {
         write_master_element(&mut header, EBML, &ebml_content);
         file.write_all(&header)?;
 
-        // Segment (unknown size — streaming)
         let mut seg_header = Vec::new();
         write_element_id(&mut seg_header, SEGMENT);
-        // Unknown size VINT: 0x01FFFFFFFFFFFFFF
+
         seg_header.extend_from_slice(&[0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
         file.write_all(&seg_header)?;
 
-        // Info element
         let mut info_content = Vec::new();
-        write_uint_element(&mut info_content, TIMECODE_SCALE, 1_000_000); // 1ms units
+        write_uint_element(&mut info_content, TIMECODE_SCALE, 1_000_000);
         write_string_element(&mut info_content, MUXING_APP, "HopToDesk");
         write_string_element(&mut info_content, WRITING_APP, "HopToDesk XP");
 
@@ -179,7 +171,6 @@ impl Recorder {
         write_master_element(&mut info, INFO, &info_content);
         file.write_all(&info)?;
 
-        // Tracks element
         let mut video_content = Vec::new();
         write_uint_element(&mut video_content, PIXEL_WIDTH, width as u64);
         write_uint_element(&mut video_content, PIXEL_HEIGHT, height as u64);
@@ -187,7 +178,7 @@ impl Recorder {
         let mut track_content = Vec::new();
         write_uint_element(&mut track_content, TRACK_NUMBER, 1);
         write_uint_element(&mut track_content, TRACK_UID, 1);
-        write_uint_element(&mut track_content, TRACK_TYPE, 1); // video
+        write_uint_element(&mut track_content, TRACK_TYPE, 1);
         write_string_element(&mut track_content, CODEC_ID, "V_VP8");
         write_master_element(&mut track_content, VIDEO, &video_content);
 
@@ -210,19 +201,16 @@ impl Recorder {
         })
     }
 
-    /// Write a VP8 frame. `keyframe` should be true for keyframes.
     pub fn write_vp8_frame(&mut self, data: &[u8], keyframe: bool) -> io::Result<()> {
         let timestamp_ms = self.start_time.elapsed().as_millis() as u64;
 
-        // Start a new cluster on each keyframe (or first frame)
         if keyframe || !self.cluster_open {
-            // Cluster header (unknown size for streaming)
+
             let mut cluster_header = Vec::new();
             write_element_id(&mut cluster_header, CLUSTER);
             cluster_header.extend_from_slice(&[0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
             self.file.write_all(&cluster_header)?;
 
-            // Cluster timecode
             let mut tc = Vec::new();
             write_uint_element(&mut tc, TIMECODE, timestamp_ms);
             self.file.write_all(&tc)?;
@@ -230,27 +218,25 @@ impl Recorder {
             self.cluster_open = true;
         }
 
-        // SimpleBlock: track=1, timecode relative to cluster=0, flags
-        let flags: u8 = if keyframe { 0x80 } else { 0x00 }; // bit 0 = keyframe
-        let block_data_len = 1 + 2 + 1 + data.len(); // track_vint + timecode(2) + flags(1) + payload
+        let flags: u8 = if keyframe { 0x80 } else { 0x00 };
+        let block_data_len = 1 + 2 + 1 + data.len();
 
         let mut block = Vec::with_capacity(block_data_len + 8);
         write_element_id(&mut block, SIMPLE_BLOCK);
         write_vint(&mut block, block_data_len as u64);
-        // Track number as VINT (track 1)
-        block.push(0x81); // VINT for 1
-        // Relative timecode (int16, 0 since we put absolute in cluster)
+
+        block.push(0x81);
+
         block.push(0x00);
         block.push(0x00);
-        // Flags
+
         block.push(flags);
-        // Frame data
+
         block.extend_from_slice(data);
 
         self.file.write_all(&block)?;
         self.frame_count += 1;
 
-        // Flush periodically
         if self.frame_count % 30 == 0 {
             self.file.flush()?;
         }
@@ -282,19 +268,19 @@ fn chrono_timestamp() -> String {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     let secs = now.as_secs();
-    // Simple UTC timestamp: YYYYMMDD_HHMMSS
+
     let s = secs;
     let sec = s % 60;
     let min = (s / 60) % 60;
     let hour = (s / 3600) % 24;
     let days = s / 86400;
-    // Approximate date (good enough for filenames)
+
     let (y, m, d) = days_to_ymd(days);
     format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, m, d, hour, min, sec)
 }
 
 fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    // Simple Gregorian calendar conversion from Unix epoch days
+
     let mut y = 1970;
     let mut remaining = days;
     loop {

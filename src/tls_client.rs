@@ -34,7 +34,7 @@ pub struct ProxySettings {
     pub port: u16,
     pub username: String,
     pub password: String,
-    pub proxy_type: String, // "auto", "socks5", or "http"
+    pub proxy_type: String,
 }
 
 pub fn get_proxy_settings() -> Option<ProxySettings> {
@@ -62,7 +62,6 @@ pub fn get_proxy_settings() -> Option<ProxySettings> {
     })
 }
 
-/// Connect TCP through proxy if configured. Used by all outgoing connections.
 pub fn connect_tcp(target_host: &str, target_port: u16) -> Result<TcpStream, String> {
     connect_tcp_timeout(target_host, target_port, std::time::Duration::from_secs(30))
 }
@@ -76,7 +75,7 @@ pub fn connect_tcp_timeout(target_host: &str, target_port: u16, timeout: std::ti
         let proxy_addr: std::net::SocketAddr = format!("{}:{}", proxy.host, proxy.port)
             .parse()
             .or_else(|_| {
-                // DNS resolve proxy host
+
                 use std::net::ToSocketAddrs;
                 (proxy.host.as_str(), proxy.port)
                     .to_socket_addrs()
@@ -92,7 +91,7 @@ pub fn connect_tcp_timeout(target_host: &str, target_port: u16, timeout: std::ti
             "socks5" => socks5_handshake(&mut tcp, target_host, target_port, &proxy.username, &proxy.password)?,
             "http" => http_connect(&mut tcp, target_host, target_port, &proxy.username, &proxy.password)?,
             _ => {
-                // Auto: try SOCKS5 first, fall back to HTTP CONNECT
+
                 if socks5_handshake(&mut tcp, target_host, target_port, &proxy.username, &proxy.password).is_err() {
                     drop(tcp);
                     tcp = TcpStream::connect_timeout(&proxy_addr, timeout)
@@ -105,7 +104,7 @@ pub fn connect_tcp_timeout(target_host: &str, target_port: u16, timeout: std::ti
         crate::config::write_log(&format!("[proxy] Tunnel established to {}:{}", target_host, target_port));
         Ok(tcp)
     } else {
-        // Resolve hostname and connect with timeout
+
         let addr: std::net::SocketAddr = format!("{}:{}", target_host, target_port)
             .parse()
             .or_else(|_| {
@@ -122,8 +121,8 @@ pub fn connect_tcp_timeout(target_host: &str, target_port: u16, timeout: std::ti
 }
 
 fn socks5_handshake(tcp: &mut TcpStream, target_host: &str, target_port: u16, username: &str, password: &str) -> Result<(), String> {
-    // SOCKS5 greeting: version=5, 1 auth method
-    let auth_method = if username.is_empty() { 0x00u8 } else { 0x02u8 }; // 0=none, 2=user/pass
+
+    let auth_method = if username.is_empty() { 0x00u8 } else { 0x02u8 };
     tcp.write_all(&[0x05, 0x01, auth_method])
         .map_err(|e| format!("SOCKS5 greeting write: {}", e))?;
     tcp.flush().map_err(|e| format!("SOCKS5 flush: {}", e))?;
@@ -138,9 +137,8 @@ fn socks5_handshake(tcp: &mut TcpStream, target_host: &str, target_port: u16, us
         return Err("SOCKS5: no acceptable auth method".to_string());
     }
 
-    // Username/password auth if requested
     if resp[1] == 0x02 {
-        let mut auth = vec![0x01]; // sub-negotiation version
+        let mut auth = vec![0x01];
         auth.push(username.len() as u8);
         auth.extend_from_slice(username.as_bytes());
         auth.push(password.len() as u8);
@@ -155,9 +153,8 @@ fn socks5_handshake(tcp: &mut TcpStream, target_host: &str, target_port: u16, us
         }
     }
 
-    // CONNECT request: version=5, cmd=1 (connect), rsv=0, address type
     let mut req = vec![0x05, 0x01, 0x00];
-    // Use domain name (type 0x03) so proxy does DNS resolution
+
     req.push(0x03);
     req.push(target_host.len() as u8);
     req.extend_from_slice(target_host.as_bytes());
@@ -166,7 +163,6 @@ fn socks5_handshake(tcp: &mut TcpStream, target_host: &str, target_port: u16, us
     tcp.write_all(&req).map_err(|e| format!("SOCKS5 connect write: {}", e))?;
     tcp.flush().map_err(|e| format!("SOCKS5 connect flush: {}", e))?;
 
-    // Read response: at least 4 bytes header + variable address
     let mut hdr = [0u8; 4];
     tcp.read_exact(&mut hdr).map_err(|e| format!("SOCKS5 connect read: {}", e))?;
     if hdr[0] != 0x05 {
@@ -186,16 +182,16 @@ fn socks5_handshake(tcp: &mut TcpStream, target_host: &str, target_port: u16, us
         };
         return Err(format!("SOCKS5 connect failed: {} ({})", err_msg, hdr[1]));
     }
-    // Consume the bound address
+
     match hdr[3] {
-        0x01 => { let mut skip = [0u8; 6]; tcp.read_exact(&mut skip).ok(); } // IPv4 + port
+        0x01 => { let mut skip = [0u8; 6]; tcp.read_exact(&mut skip).ok(); }
         0x03 => {
             let mut len = [0u8; 1];
             tcp.read_exact(&mut len).ok();
             let mut skip = vec![0u8; len[0] as usize + 2];
             tcp.read_exact(&mut skip).ok();
         }
-        0x04 => { let mut skip = [0u8; 18]; tcp.read_exact(&mut skip).ok(); } // IPv6 + port
+        0x04 => { let mut skip = [0u8; 18]; tcp.read_exact(&mut skip).ok(); }
         _ => {}
     }
     Ok(())
@@ -260,13 +256,10 @@ fn tls_request(
         .map_err(|e| format!("TLS write failed: {}", e))?;
     stream.flush().map_err(|e| format!("TLS flush failed: {}", e))?;
 
-    // Read response incrementally — don't rely on read_to_end/EOF which
-    // can return 0 bytes if the TLS close_notify arrives before data.
     let mut response = Vec::with_capacity(4096);
     let mut buf = [0u8; 4096];
     let mut header_end_pos: Option<usize> = None;
 
-    // Phase 1: read until we have the full header (\r\n\r\n)
     loop {
         let n = stream.read(&mut buf)
             .map_err(|e| format!("TLS read failed: {}", e))?;
@@ -295,11 +288,10 @@ fn tls_request(
     }
 
     let header_lower = header_str.to_lowercase();
-    let body_start = hdr_end + 4; // skip \r\n\r\n
+    let body_start = hdr_end + 4;
 
-    // Phase 2: read body based on Content-Length or chunked
     if header_lower.contains("transfer-encoding: chunked") {
-        // Read until we see the final chunk "0\r\n\r\n"
+
         loop {
             let body_so_far = &response[body_start..];
             if body_ends_with_final_chunk(body_so_far) { break; }
@@ -310,7 +302,7 @@ fn tls_request(
         }
         decode_chunked(&response[body_start..])
     } else if let Some(cl) = parse_content_length(&header_lower) {
-        // Read exactly Content-Length bytes
+
         while response.len() - body_start < cl {
             let n = stream.read(&mut buf)
                 .map_err(|e| format!("TLS read (body) failed: {}", e))?;
@@ -320,7 +312,7 @@ fn tls_request(
         String::from_utf8(response[body_start..].to_vec())
             .map_err(|e| format!("UTF-8 error: {}", e))
     } else {
-        // No Content-Length, not chunked — read until EOF
+
         loop {
             let n = match stream.read(&mut buf) {
                 Ok(0) => break,
@@ -338,10 +330,9 @@ fn tls_request(
 }
 
 fn body_ends_with_final_chunk(data: &[u8]) -> bool {
-    // Final chunk is "0\r\n\r\n" or "0\r\n<trailers>\r\n"
-    // Look for "\r\n0\r\n\r\n" or data starting with "0\r\n\r\n"
+
     if data.len() >= 5 && &data[data.len()-5..] == b"0\r\n\r\n" { return true; }
-    // Also check for the pattern anywhere preceded by \r\n
+
     for i in 0..data.len().saturating_sub(6) {
         if &data[i..i+7] == b"\r\n0\r\n\r\n" { return true; }
     }
@@ -370,7 +361,7 @@ fn decode_chunked(data: &[u8]) -> Result<String, String> {
     let mut result = Vec::new();
     let mut pos = 0;
     loop {
-        // Find end of chunk size line
+
         let line_end = match find_crlf(data, pos) {
             Some(i) => i,
             None => break,
@@ -383,13 +374,13 @@ fn decode_chunked(data: &[u8]) -> Result<String, String> {
         if size == 0 {
             break;
         }
-        let chunk_start = line_end + 2; // skip \r\n
+        let chunk_start = line_end + 2;
         let chunk_end = chunk_start + size;
         if chunk_end > data.len() {
             return Err("Truncated chunk".to_string());
         }
         result.extend_from_slice(&data[chunk_start..chunk_end]);
-        pos = chunk_end + 2; // skip trailing \r\n
+        pos = chunk_end + 2;
     }
     String::from_utf8(result).map_err(|e| format!("UTF-8 error: {}", e))
 }
@@ -405,7 +396,7 @@ fn find_crlf(data: &[u8], start: usize) -> Option<usize> {
 
 fn build_request(method: &str, host: &str, path: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut req = format!(
-        "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: HopToDesk\r\n",
+        "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
         method, path, host
     );
     if !body.is_empty() {

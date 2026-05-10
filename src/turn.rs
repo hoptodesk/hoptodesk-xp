@@ -173,14 +173,11 @@ fn stun_class(msg_type: u16) -> u16 {
 }
 
 fn new_tid() -> [u8; 12] {
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
+    let bytes = crate::config::generate_random_bytes(12);
     let mut tid = [0u8; 12];
-    let nanos = t.as_nanos();
-    tid[0..8].copy_from_slice(&nanos.to_le_bytes()[..8]);
-    let ptr = &tid as *const _ as usize;
-    tid[8..12].copy_from_slice(&(ptr as u32).to_le_bytes());
+    if bytes.len() == 12 {
+        tid.copy_from_slice(&bytes);
+    }
     tid
 }
 

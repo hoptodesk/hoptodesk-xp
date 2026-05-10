@@ -102,7 +102,7 @@ impl FramedStream {
             let port: u16 = addr[pos + 1..].parse().map_err(|e| {
                 io::Error::new(io::ErrorKind::InvalidInput, format!("bad port: {}", e))
             })?;
-            // Use proxy-aware TCP connect
+
             crate::tls_client::connect_tcp_timeout(host, port, timeout)
                 .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?
         } else {

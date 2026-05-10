@@ -366,22 +366,15 @@ impl WsClient {
 }
 
 fn generate_ws_key() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-
-    let mut state = seed as u64;
-    let mut bytes = [0u8; 16];
-    for b in bytes.iter_mut() {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        *b = (state >> 33) as u8;
-    }
+    let bytes = crate::config::generate_random_bytes(16);
     base64_encode(&bytes)
 }
 
 fn generate_mask() -> [u8; 4] {
+    let bytes = crate::config::generate_random_bytes(4);
+    if bytes.len() == 4 {
+        return [bytes[0], bytes[1], bytes[2], bytes[3]];
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)

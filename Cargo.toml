@@ -3,7 +3,7 @@ members = ["launcher"]
 
 [package]
 name = "hoptodesk"
-version = "1.45.20"
+version = "1.45.25"
 authors = ["hoptodesk <info@hoptodesk.com>"]
 edition = "2021"
 rust-version = "1.75"
@@ -70,7 +70,6 @@ panic = 'abort'
 strip = true
 opt-level = 'z'
 
-# Release build with debug info for diagnostics (use --profile release-debug)
 [profile.release-debug]
 inherits = "release"
 strip = false

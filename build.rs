@@ -1,5 +1,5 @@
 fn main() {
-    // Generate protobuf Rust code from .proto files into OUT_DIR
+
     let out_dir = std::env::var("OUT_DIR").unwrap();
     protobuf_codegen::Codegen::new()
         .pure()
@@ -9,8 +9,6 @@ fn main() {
         .run()
         .expect("protobuf codegen failed");
 
-    // Strip inner attributes (#![...]) from generated files so they can be
-    // included inside mod {} blocks (inner attributes are only valid at crate root)
     for name in &["rendezvous.rs", "message.rs"] {
         let path = std::path::Path::new(&out_dir).join(name);
         if let Ok(content) = std::fs::read_to_string(&path) {
@@ -26,22 +24,19 @@ fn main() {
         }
     }
 
-    // Link Win32 libraries explicitly (needed for FFI extern blocks)
     println!("cargo:rustc-link-lib=user32");
     println!("cargo:rustc-link-lib=gdi32");
     println!("cargo:rustc-link-lib=kernel32");
     println!("cargo:rustc-link-lib=shell32");
     println!("cargo:rustc-link-lib=advapi32");
 
-    // Link libvpx for VP8 video encoding (from vcpkg x86-windows-static)
     if let Ok(vcpkg_root) = std::env::var("VCPKG_ROOT") {
         println!("cargo:rustc-link-search=native={}/installed/x86-windows-static/lib", vcpkg_root);
     }
-    // Hardcoded fallback for build VM
+
     println!("cargo:rustc-link-search=native=C:/build/vcpkg/installed/x86-windows-static/lib");
     println!("cargo:rustc-link-lib=static=vpx");
 
-    // VP8 encoder helper (C code — avoids Rust FFI struct layout issues)
     #[cfg(target_os = "windows")]
     {
         let vcpkg_inc = "C:/build/vcpkg/installed/x86-windows-static/include";
@@ -51,11 +46,6 @@ fn main() {
             .compile("vpx_helper");
     }
 
-    // bcrypt shim for XP compatibility:
-    // Ring (used by rustls) imports BCryptGenRandom from bcrypt.dll (Vista+).
-    // bcrypt_shim.c provides xp_BCryptGenRandom using CryptGenRandom (XP-safe).
-    // bcrypt_imp.asm overrides the __imp__BCryptGenRandom@16 thunk,
-    // preventing the linker from importing BCryptGenRandom from bcrypt.dll.
     #[cfg(target_os = "windows")]
     {
         cc::Build::new()
@@ -77,7 +67,6 @@ fn main() {
         let def_path = std::path::Path::new(&out_dir).join("sciter.def");
         std::fs::write(&def_path, "LIBRARY sciter.dll\nEXPORTS\n    SciterAPI\n").unwrap();
 
-        // Find lib.exe from same directory as cl.exe (cc crate detects MSVC tools)
         let compiler = cc::Build::new().get_compiler();
         let lib_exe = compiler.path().parent().unwrap().join("lib.exe");
 
@@ -93,7 +82,7 @@ fn main() {
             if s.success() {
                 println!("cargo:rustc-link-search=native={}", out_dir);
                 println!("cargo:rustc-link-lib=dylib=sciter");
-                // Force linker to include the SciterAPI import (prevents /OPT:REF from discarding it)
+
                 println!("cargo:rustc-link-arg=/INCLUDE:_SciterAPI");
             } else {
                 eprintln!("WARNING: lib.exe failed, sciter.dll will be loaded via LoadLibrary (may crash on XP)");
@@ -101,7 +90,6 @@ fn main() {
         }
     }
 
-    // Run packfolder to bundle UI files into target/resources.rc
     #[cfg(feature = "packui")]
     {
         let rc_path = std::path::PathBuf::from("target/resources.rc");
@@ -120,7 +108,6 @@ fn main() {
         }
     }
 
-    // Windows resource file (icon, version info)
     #[cfg(target_os = "windows")]
     {
         let mut res = winres::WindowsResource::new();

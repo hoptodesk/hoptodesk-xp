@@ -1,3 +1,4 @@
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::ffi::c_void;
@@ -5,7 +6,6 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-// Paths set by build-windows-xp.sh via env vars at cargo-build time.
 const SCITER_DLL: &[u8] = include_bytes!(env!("EMBED_SCITER_DLL"));
 const INNER_EXE: &[u8] = include_bytes!(env!("EMBED_INNER_EXE"));
 
@@ -91,8 +91,6 @@ fn wide_cstr(v: &[u16]) -> String {
     String::from_utf16_lossy(&v[..end])
 }
 
-// Walk the process list and terminate every HopToDesk.exe / Uninstall.exe
-// we find (except ourselves) so their files aren't locked when we overwrite.
 fn kill_matching_processes(names: &[&str]) {
     let self_pid = unsafe { GetCurrentProcessId() };
     let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
@@ -132,8 +130,7 @@ fn kill_matching_processes(names: &[&str]) {
 }
 
 fn main() {
-    // %APPDATA% exists on every Windows from 2000 onward. %LOCALAPPDATA%
-    // would be Vista+ — not safe on XP.
+
     let appdata = match std::env::var("APPDATA") {
         Ok(v) if !v.is_empty() => PathBuf::from(v),
         _ => std::process::exit(1),
@@ -172,8 +169,8 @@ fn main() {
             wide_cmd.as_mut_ptr(),
             ptr::null_mut(),
             ptr::null_mut(),
-            0,             // bInheritHandles = FALSE
-            0,             // dwCreationFlags
+            0,
+            0,
             ptr::null_mut(),
             wide_dir.as_ptr(),
             &mut si,

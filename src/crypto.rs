@@ -153,15 +153,8 @@ pub fn compute_password_hash(password: &str, salt: &str, challenge: &str) -> [u8
     h2.finalize()
 }
 
-// ============================================================================
-// Curve25519 ECDH (X25519) — Montgomery ladder on GF(2^255-19)
-// Direct port of TweetNaCl using 16-limb i64 representation.
-// Reference: TweetNaCl (tweetnacl.cr.yp.to), RFC 7748
-// ============================================================================
-
 pub mod fe25519 {
-    // Field element: 16 limbs of i64, each ~16 bits
-    // This matches TweetNaCl's "gf" type exactly.
+
     pub type Gf = [i64; 16];
 
     pub fn gf0() -> Gf { [0i64; 16] }
@@ -191,7 +184,7 @@ pub mod fe25519 {
         car25519(&mut t);
         car25519(&mut t);
         car25519(&mut t);
-        // Two rounds of conditional subtraction of p = 2^255 - 19
+
         for _ in 0..2 {
             let mut m = [0i64; 16];
             m[0] = t[0] - 0xffed;
@@ -211,7 +204,7 @@ pub mod fe25519 {
     }
 
     pub fn sel25519(p: &mut Gf, q: &mut Gf, b: i64) {
-        let c = !(b - 1); // b=1 → c=all-ones; b=0 → c=0
+        let c = !(b - 1);
         for i in 0..16 {
             let t = c & (p[i] ^ q[i]);
             p[i] ^= t;
@@ -253,14 +246,13 @@ pub mod fe25519 {
     }
 
     pub fn gf_mul121665(a: &Gf) -> Gf {
-        // _121665 as a field element: {0xDB41, 1, 0, ...}
-        // Use full field multiply to match TweetNaCl's M(o, a, _121665)
+
         let b: Gf = [0xDB41, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         gf_mul(a, &b)
     }
 
     pub fn inv25519(a: &Gf) -> Gf {
-        // Compute a^(p-2) = a^(2^255-21)
+
         let mut c = *a;
         for i in (0..=253).rev() {
             let t = gf_sq(&c);
@@ -274,8 +266,6 @@ pub mod fe25519 {
     }
 }
 
-// X25519: Curve25519 Diffie-Hellman (RFC 7748)
-// Direct port of TweetNaCl's crypto_scalarmult_curve25519
 fn x25519_scalar_mult(n: &[u8; 32], p: &[u8; 32]) -> [u8; 32] {
     use fe25519::*;
 
@@ -287,34 +277,34 @@ fn x25519_scalar_mult(n: &[u8; 32], p: &[u8; 32]) -> [u8; 32] {
     let mut x = gf0();
     unpack25519(&mut x, p);
 
-    let mut a = gf1();      // x_2
-    let mut b = x;           // x_3
-    let mut c = gf0();       // z_2
-    let mut d = gf1();       // z_3
+    let mut a = gf1();
+    let mut b = x;
+    let mut c = gf0();
+    let mut d = gf1();
 
     for i in (0..=254i32).rev() {
         let r = ((z[(i >> 3) as usize] >> (i & 7)) & 1) as i64;
         sel25519(&mut a, &mut b, r);
         sel25519(&mut c, &mut d, r);
-        // Exact TweetNaCl Montgomery ladder (from tweetnacl.c lines 412-429)
-        let mut e = gf_add(&a, &c);       // e = x2+z2
-        a = gf_sub(&a, &c);               // a = x2-z2
-        c = gf_add(&b, &d);               // c = x3+z3
-        b = gf_sub(&b, &d);               // b = x3-z3
-        d = gf_sq(&e);                    // d = (x2+z2)^2 = AA
-        let f = gf_sq(&a);                // f = (x2-z2)^2 = BB
-        a = gf_mul(&c, &a);               // a = (x3+z3)(x2-z2) = DA
-        c = gf_mul(&b, &e);               // c = (x3-z3)(x2+z2) = CB
-        e = gf_add(&a, &c);               // e = DA+CB
-        a = gf_sub(&a, &c);               // a = DA-CB
-        b = gf_sq(&a);                    // b = (DA-CB)^2
-        c = gf_sub(&d, &f);               // c = AA-BB = E
-        a = gf_mul121665(&c);             // a = 121665*E
-        a = gf_add(&a, &d);               // a = 121665*E + AA
-        c = gf_mul(&c, &a);               // c = E*(121665*E + AA) = z2'
-        a = gf_mul(&d, &f);               // a = AA*BB = x2'
-        d = gf_mul(&b, &x);               // d = (DA-CB)^2 * x1 = z3'
-        b = gf_sq(&e);                    // b = (DA+CB)^2 = x3'
+
+        let mut e = gf_add(&a, &c);
+        a = gf_sub(&a, &c);
+        c = gf_add(&b, &d);
+        b = gf_sub(&b, &d);
+        d = gf_sq(&e);
+        let f = gf_sq(&a);
+        a = gf_mul(&c, &a);
+        c = gf_mul(&b, &e);
+        e = gf_add(&a, &c);
+        a = gf_sub(&a, &c);
+        b = gf_sq(&a);
+        c = gf_sub(&d, &f);
+        a = gf_mul121665(&c);
+        a = gf_add(&a, &d);
+        c = gf_mul(&c, &a);
+        a = gf_mul(&d, &f);
+        d = gf_mul(&b, &x);
+        b = gf_sq(&e);
         sel25519(&mut a, &mut b, r);
         sel25519(&mut c, &mut d, r);
     }
@@ -344,11 +334,6 @@ pub fn x25519(our_sk: &[u8; 32], their_pk: &[u8; 32]) -> [u8; 32] {
     x25519_scalar_mult(our_sk, their_pk)
 }
 
-// ============================================================================
-// Salsa20 / HSalsa20 / XSalsa20 stream cipher
-// Reference: djb's Salsa20 specification
-// ============================================================================
-
 fn salsa20_quarter_round(y: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
     y[b] ^= y[a].wrapping_add(y[d]).rotate_left(7);
     y[c] ^= y[b].wrapping_add(y[a]).rotate_left(9);
@@ -359,12 +344,12 @@ fn salsa20_quarter_round(y: &mut [u32; 16], a: usize, b: usize, c: usize, d: usi
 fn salsa20_core(input: &[u32; 16], output: &mut [u32; 16]) {
     *output = *input;
     for _ in 0..10 {
-        // Column round
+
         salsa20_quarter_round(output, 0, 4, 8, 12);
         salsa20_quarter_round(output, 5, 9, 13, 1);
         salsa20_quarter_round(output, 10, 14, 2, 6);
         salsa20_quarter_round(output, 15, 3, 7, 11);
-        // Row round
+
         salsa20_quarter_round(output, 0, 1, 2, 3);
         salsa20_quarter_round(output, 5, 6, 7, 4);
         salsa20_quarter_round(output, 10, 11, 8, 9);
@@ -379,25 +364,24 @@ fn le32(s: &[u8]) -> u32 {
     u32::from_le_bytes([s[0], s[1], s[2], s[3]])
 }
 
-// HSalsa20: takes 32-byte key + 16-byte nonce, returns 32-byte subkey
 pub fn hsalsa20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut x: [u32; 16] = [
-        0x61707865,      // "expa"
+        0x61707865,
         le32(&key[0..4]),
         le32(&key[4..8]),
         le32(&key[8..12]),
         le32(&key[12..16]),
-        0x3320646e,      // "nd 3"
+        0x3320646e,
         le32(&nonce[0..4]),
         le32(&nonce[4..8]),
         le32(&nonce[8..12]),
         le32(&nonce[12..16]),
-        0x79622d32,      // "2-by"
+        0x79622d32,
         le32(&key[16..20]),
         le32(&key[20..24]),
         le32(&key[24..28]),
         le32(&key[28..32]),
-        0x6b206574,      // "te k"
+        0x6b206574,
     ];
 
     for _ in 0..10 {
@@ -411,7 +395,6 @@ pub fn hsalsa20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
         salsa20_quarter_round(&mut x, 15, 12, 13, 14);
     }
 
-    // HSalsa20 output: x[0], x[5], x[10], x[15], x[6], x[7], x[8], x[9]
     let mut out = [0u8; 32];
     out[0..4].copy_from_slice(&x[0].to_le_bytes());
     out[4..8].copy_from_slice(&x[5].to_le_bytes());
@@ -424,7 +407,6 @@ pub fn hsalsa20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     out
 }
 
-// Salsa20 XOR: encrypts/decrypts msg with 32-byte key and 8-byte nonce
 fn salsa20_xor(key: &[u8; 32], nonce: &[u8; 8], msg: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(msg.len());
     let mut block_counter: u64 = 0;
@@ -438,8 +420,8 @@ fn salsa20_xor(key: &[u8; 32], nonce: &[u8; 8], msg: &[u8]) -> Vec<u8> {
         0x3320646e,
         le32(&nonce[0..4]),
         le32(&nonce[4..8]),
-        0, // counter lo — filled per block
-        0, // counter hi — filled per block
+        0,
+        0,
         0x79622d32,
         le32(&key[16..20]),
         le32(&key[20..24]),
@@ -477,7 +459,6 @@ fn salsa20_xor(key: &[u8; 32], nonce: &[u8; 8], msg: &[u8]) -> Vec<u8> {
     out
 }
 
-// XSalsa20: 32-byte key + 24-byte nonce
 fn xsalsa20_xor(key: &[u8; 32], nonce: &[u8; 24], msg: &[u8]) -> Vec<u8> {
     let mut hnonce = [0u8; 16];
     hnonce.copy_from_slice(&nonce[0..16]);
@@ -487,20 +468,13 @@ fn xsalsa20_xor(key: &[u8; 32], nonce: &[u8; 24], msg: &[u8]) -> Vec<u8> {
     salsa20_xor(&subkey, &snonce, msg)
 }
 
-// XSalsa20 keystream: same as xor with zero msg
 fn xsalsa20_keystream(key: &[u8; 32], nonce: &[u8; 24], len: usize) -> Vec<u8> {
     let zeros = vec![0u8; len];
     xsalsa20_xor(key, nonce, &zeros)
 }
 
-// ============================================================================
-// Poly1305 one-time MAC
-// Reference: RFC 7539 / djb's poly1305 specification
-// Uses u64 arithmetic (safe on i686 — Rust handles 64-bit ops on 32-bit)
-// ============================================================================
-
 fn poly1305_mac(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
-    // Clamp r
+
     let mut r = [0u32; 5];
     r[0] = (le32(&key[0..4])) & 0x3ffffff;
     r[1] = (le32(&key[3..7]) >> 2) & 0x3ffff03;
@@ -520,7 +494,7 @@ fn poly1305_mac(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
         let block_len = if remaining < 16 { remaining } else { 16 };
         let mut buf = [0u8; 17];
         buf[..block_len].copy_from_slice(&msg[i..i + block_len]);
-        buf[block_len] = 1; // padding bit
+        buf[block_len] = 1;
 
         h[0] = h[0].wrapping_add(
             (buf[0] as u32) | ((buf[1] as u32) << 8) | ((buf[2] as u32) << 16) | (((buf[3] as u32) & 3) << 24)
@@ -538,7 +512,6 @@ fn poly1305_mac(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
             (buf[13] as u32) | ((buf[14] as u32) << 8) | ((buf[15] as u32) << 16) | ((buf[16] as u32) << 24)
         );
 
-        // Multiply h by r
         let r0 = r[0] as u64; let r1 = r[1] as u64; let r2 = r[2] as u64;
         let r3 = r[3] as u64; let r4 = r[4] as u64;
         let s1_ = r1 * 5; let s2_ = r2 * 5; let s3_ = r3 * 5; let s4_ = r4 * 5;
@@ -562,7 +535,6 @@ fn poly1305_mac(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
         i += block_len;
     }
 
-    // Final reduction
     let mut c: u32;
     c = h[1] >> 26; h[1] &= 0x3ffffff; h[2] = h[2].wrapping_add(c);
     c = h[2] >> 26; h[2] &= 0x3ffffff; h[3] = h[3].wrapping_add(c);
@@ -570,7 +542,6 @@ fn poly1305_mac(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
     c = h[4] >> 26; h[4] &= 0x3ffffff; h[0] = h[0].wrapping_add(c.wrapping_mul(5));
     c = h[0] >> 26; h[0] &= 0x3ffffff; h[1] = h[1].wrapping_add(c);
 
-    // Compute h - p
     let mut g = [0u32; 5];
     g[0] = h[0].wrapping_add(5); c = g[0] >> 26; g[0] &= 0x3ffffff;
     g[1] = h[1].wrapping_add(c); c = g[1] >> 26; g[1] &= 0x3ffffff;
@@ -578,13 +549,11 @@ fn poly1305_mac(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
     g[3] = h[3].wrapping_add(c); c = g[3] >> 26; g[3] &= 0x3ffffff;
     g[4] = h[4].wrapping_add(c).wrapping_sub(1 << 26);
 
-    // Select h or g
-    let mask = (g[4] >> 31).wrapping_sub(1); // 0 if g[4] negative (h < p), 0xffffffff if not
+    let mask = (g[4] >> 31).wrapping_sub(1);
     for i in 0..5 {
         h[i] = (h[i] & !mask) | (g[i] & mask);
     }
 
-    // Reassemble h into 4 u32 words and add s (mod 2^128)
     let hh0 = (h[0] as u64) | ((h[1] as u64) << 26);
     let hh1 = ((h[1] as u64) >> 6) | ((h[2] as u64) << 20);
     let hh2 = ((h[2] as u64) >> 12) | ((h[3] as u64) << 14);
@@ -604,13 +573,8 @@ fn poly1305_mac(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
     mac
 }
 
-// ============================================================================
-// NaCl secretbox (XSalsa20-Poly1305)
-// Output format: 16-byte MAC || ciphertext (same as libsodium)
-// ============================================================================
-
 pub fn secretbox_seal(key: &[u8; 32], nonce: &[u8; 24], plaintext: &[u8]) -> Vec<u8> {
-    // Generate keystream for Poly1305 key (first 32 bytes) and encryption
+
     let stream = xsalsa20_keystream(key, nonce, 32 + plaintext.len());
     let mut poly_key = [0u8; 32];
     poly_key.copy_from_slice(&stream[..32]);
@@ -638,7 +602,7 @@ pub fn secretbox_open(key: &[u8; 32], nonce: &[u8; 24], sealed: &[u8]) -> Result
     poly_key.copy_from_slice(&stream[..32]);
 
     let computed_mac = poly1305_mac(&poly_key, ciphertext);
-    // Constant-time comparison
+
     let mut diff = 0u8;
     for i in 0..16 {
         diff |= mac_bytes[i] ^ computed_mac[i];
@@ -653,11 +617,6 @@ pub fn secretbox_open(key: &[u8; 32], nonce: &[u8; 24], sealed: &[u8]) -> Result
     }
     Ok(plaintext)
 }
-
-// ============================================================================
-// NaCl crypto_box (Curve25519-XSalsa20-Poly1305)
-// Matches sodiumoxide::crypto::box_::seal / box_::open
-// ============================================================================
 
 fn crypto_box_beforenm(our_sk: &[u8; 32], their_pk: &[u8; 32]) -> [u8; 32] {
     let shared = x25519(our_sk, their_pk);
@@ -684,10 +643,6 @@ pub fn crypto_box_open(
     let k = crypto_box_beforenm(our_sk, their_pk);
     secretbox_open(&k, nonce, sealed)
 }
-
-// ============================================================================
-// SHA-512 hash (needed for Ed25519 signing)
-// ============================================================================
 
 const K512: [u64; 80] = [
     0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc,
@@ -768,10 +723,9 @@ fn sha512(data: &[u8]) -> [u8; 64] {
         i += 128;
     }
 
-    // Padding
     let rem = data.len() - i;
     let bit_len = (data.len() as u128) * 8;
-    let mut buf = [0u8; 256]; // max 2 blocks
+    let mut buf = [0u8; 256];
     buf[..rem].copy_from_slice(&data[i..]);
     buf[rem] = 0x80;
     let padded_len = if rem + 17 <= 128 { 128 } else { 256 };
@@ -792,36 +746,27 @@ fn sha512(data: &[u8]) -> [u8; 64] {
     out
 }
 
-// ============================================================================
-// Ed25519 signing — twisted Edwards curve operations
-// Direct port of TweetNaCl's Ed25519 implementation.
-// Uses the same GF(2^255-19) field arithmetic from fe25519 module.
-// ============================================================================
-
 mod ed25519 {
     use super::fe25519::*;
 
-    // Ed25519 curve parameter d = -121665/121666 (mod p)
     const D: Gf = [0x78a3, 0x1359, 0x4dca, 0x75eb, 0xd8ab, 0x4141, 0x0a4d, 0x0070,
                    0xe898, 0x7779, 0x4079, 0x8cc7, 0xfe73, 0x2b6f, 0x6cee, 0x5203];
-    // 2*d
+
     const D2: Gf = [0xf159, 0x26b2, 0x9b94, 0xebd6, 0xb156, 0x8283, 0x149a, 0x00e0,
                     0xd130, 0xeef3, 0x80f2, 0x198e, 0xfce7, 0x56df, 0xd9dc, 0x2406];
-    // Base point x-coordinate
+
     const BX: Gf = [0xd51a, 0x8f25, 0x2d60, 0xc956, 0xa7b2, 0x9525, 0xc760, 0x692c,
                     0xdc5c, 0xfdd6, 0xe231, 0xc0a4, 0x53fe, 0xcd6e, 0x36d3, 0x2169];
-    // Base point y-coordinate
+
     const BY: Gf = [0x6658, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666,
                     0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666];
 
-    // Group order L = 2^252 + 27742317777372353535851937790883648493
     const L: [u64; 32] = [
         0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
         0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
     ];
 
-    // Extended twisted Edwards point: (X, Y, Z, T) where x=X/Z, y=Y/Z, T=XY/Z
     type Point = [Gf; 4];
 
     fn par(a: &Gf) -> u8 {
@@ -830,7 +775,6 @@ mod ed25519 {
         d[0] & 1
     }
 
-    // Encode point to 32 bytes
     fn pack_point(r: &mut [u8; 32], p: &Point) {
         let zi = inv25519(&p[2]);
         let tx = gf_mul(&p[0], &zi);
@@ -839,7 +783,6 @@ mod ed25519 {
         r[31] ^= par(&tx) << 7;
     }
 
-    // Point addition in extended coordinates (from TweetNaCl)
     fn add(p: &mut Point, q: &Point) {
         let a = gf_sub(&p[1], &p[0]);
         let t = gf_sub(&q[1], &q[0]);
@@ -867,9 +810,8 @@ mod ed25519 {
         }
     }
 
-    // Scalar multiplication: returns s * q
     fn scalarmult(q: &Point, s: &[u8]) -> Point {
-        let mut p: Point = [gf0(), gf1(), gf1(), gf0()]; // neutral element
+        let mut p: Point = [gf0(), gf1(), gf1(), gf0()];
         let mut q = *q;
         for i in (0..=255i32).rev() {
             let b = ((s[(i >> 3) as usize] >> (i & 7)) & 1) as i64;
@@ -882,13 +824,11 @@ mod ed25519 {
         p
     }
 
-    // Base point multiplication: returns s * B
     fn scalarbase(s: &[u8]) -> Point {
         let mut q: Point = [BX, BY, gf1(), gf_mul(&BX, &BY)];
         scalarmult(&q, s)
     }
 
-    // Reduce mod L (group order)
     fn mod_l(r: &mut [u8; 64], x: &mut [i64; 64]) {
         for i in (32..=63i32).rev() {
             let mut carry: i64 = 0;
@@ -921,13 +861,10 @@ mod ed25519 {
         let mut x = [0i64; 64];
         for i in 0..64 { x[i] = r[i] as i64; }
         for i in 0..64 { r[i] = 0; }
-        // mod_l writes to first 32 bytes of a [u8; 64]
+
         mod_l(r, &mut x);
     }
 
-    // Generate Ed25519 keypair from 32-byte seed
-    // Returns (sk: [u8; 64], pk: [u8; 32])
-    // sk = seed || pk (TweetNaCl format, same as sodiumoxide)
     pub fn keypair(seed: &[u8; 32]) -> ([u8; 64], [u8; 32]) {
         let d = super::sha512(seed);
         let mut scalar = [0u8; 32];
@@ -946,8 +883,6 @@ mod ed25519 {
         (sk, pk)
     }
 
-    // Ed25519 sign: returns signature (64 bytes) || message
-    // sk is 64 bytes: seed || pk (TweetNaCl/sodiumoxide format)
     pub fn sign(msg: &[u8], sk: &[u8; 64]) -> Vec<u8> {
         let d = super::sha512(&sk[..32]);
         let mut scalar = [0u8; 32];
@@ -957,32 +892,27 @@ mod ed25519 {
         scalar[31] |= 64;
 
         let mut sm = vec![0u8; 64 + msg.len()];
-        // sm = [0..32 for R] [d[32..64]] [message]
+
         sm[64..].copy_from_slice(msg);
         sm[32..64].copy_from_slice(&d[32..64]);
 
-        // r = SHA-512(d[32..64] || msg)
         let r_hash = super::sha512(&sm[32..]);
         let mut r = [0u8; 64];
         r.copy_from_slice(&r_hash);
         reduce(&mut r);
 
-        // R = r * B
         let p = scalarbase(&r[..32]);
         let mut r_point = [0u8; 32];
         pack_point(&mut r_point, &p);
         sm[..32].copy_from_slice(&r_point);
 
-        // sm[32..64] = pk
         sm[32..64].copy_from_slice(&sk[32..64]);
 
-        // h = SHA-512(R || pk || msg)
         let h_hash = super::sha512(&sm);
         let mut h = [0u8; 64];
         h.copy_from_slice(&h_hash);
         reduce(&mut h);
 
-        // s = r + h * scalar (mod L)
         let mut x = [0i64; 64];
         for i in 0..32 { x[i] = r[i] as i64; }
         for i in 0..32 {
@@ -998,7 +928,6 @@ mod ed25519 {
     }
 }
 
-// Public API for Ed25519
 pub fn ed25519_keypair(seed: &[u8; 32]) -> ([u8; 64], [u8; 32]) {
     ed25519::keypair(seed)
 }
@@ -1007,17 +936,13 @@ pub fn ed25519_sign(msg: &[u8], sk: &[u8; 64]) -> Vec<u8> {
     ed25519::sign(msg, sk)
 }
 
-// ============================================================================
-// Test vectors
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_x25519_basepoint() {
-        // RFC 7748 Section 6.1: Alice's public key = privkey * basepoint
+
         let sk = [
             0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d,
             0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45,
@@ -1036,7 +961,7 @@ mod tests {
 
     #[test]
     fn test_x25519_ecdh() {
-        // RFC 7748 ECDH test
+
         let alice_sk = [
             0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d,
             0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45,
@@ -1110,7 +1035,7 @@ mod tests {
 
     #[test]
     fn test_sha512() {
-        // SHA-512("abc") test vector from FIPS 180-2
+
         let hash = sha512(b"abc");
         let expected: [u8; 64] = [
             0xdd, 0xaf, 0x35, 0xa1, 0x93, 0x61, 0x7a, 0xba,
@@ -1127,7 +1052,7 @@ mod tests {
 
     #[test]
     fn test_ed25519_sign() {
-        // RFC 8032 Section 7.1 Test Vector 1
+
         let seed: [u8; 32] = [
             0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
             0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -1135,12 +1060,7 @@ mod tests {
             0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
         ];
         let (sk, _pk) = ed25519_keypair(&seed);
-        // Note: pk encoding differs from RFC 8032 canonical form because our
-        // pack25519 (matching TweetNaCl) can produce non-canonical representations.
-        // Signatures are unaffected — the pk stored in sk[32..64] is used consistently
-        // for both signing and verification hash computation.
 
-        // Sign empty message — signature must match RFC 8032 exactly
         let signed = ed25519_sign(b"", &sk);
         assert_eq!(signed.len(), 64, "Signed empty message should be 64 bytes");
         let expected_sig: [u8; 64] = [
@@ -1158,7 +1078,7 @@ mod tests {
 
     #[test]
     fn test_ed25519_sign_message() {
-        // RFC 8032 Section 7.1 Test Vector 2
+
         let seed: [u8; 32] = [
             0x4c, 0xcd, 0x08, 0x9b, 0x28, 0xff, 0x96, 0xda,
             0x9d, 0xb6, 0xc3, 0x46, 0xec, 0x11, 0x4e, 0x0f,
@@ -1166,10 +1086,9 @@ mod tests {
             0xda, 0x8c, 0xf6, 0xed, 0x4f, 0xb8, 0xa6, 0xfb,
         ];
         let (sk, _pk) = ed25519_keypair(&seed);
-        // pk assertion skipped — see note in test_ed25519_sign about non-canonical encoding
 
         let signed = ed25519_sign(&[0x72], &sk);
-        assert_eq!(signed.len(), 65); // 64 sig + 1 byte msg
+        assert_eq!(signed.len(), 65);
         let expected_sig: [u8; 64] = [
             0x92, 0xa0, 0x09, 0xa9, 0xf0, 0xd4, 0xca, 0xb8,
             0x72, 0x0e, 0x82, 0x0b, 0x5f, 0x64, 0x25, 0x40,
@@ -1185,7 +1104,7 @@ mod tests {
 
     #[test]
     fn test_hsalsa20_vector() {
-        // NaCl test vector for HSalsa20
+
         let key = [
             0x1b, 0x27, 0x55, 0x64, 0x73, 0xe9, 0x85, 0xd4,
             0x62, 0xcd, 0x51, 0x19, 0x7a, 0x9a, 0x46, 0xc7,

@@ -6,7 +6,6 @@ const SERVER_NAME: &str = "hoptodesk-mcp";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
-/// Stdio mode: reads JSON-RPC from stdin, writes to stdout
 pub fn run() {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -26,7 +25,6 @@ pub fn run() {
     }
 }
 
-/// Process a single MCP request from the dashboard relay
 pub fn handle_mcp_request(payload: &str) -> Option<String> {
     process_line(payload)
 }
@@ -297,17 +295,16 @@ fn tool_screenshot() -> Value {
 
         BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, 0, 0, SRCCOPY);
 
-        // BITMAPINFOHEADER (40 bytes)
         let mut bmi = vec![0u8; 44];
-        // biSize
+
         bmi[0..4].copy_from_slice(&40u32.to_le_bytes());
-        // biWidth
+
         bmi[4..8].copy_from_slice(&(w as u32).to_le_bytes());
-        // biHeight (negative = top-down)
+
         bmi[8..12].copy_from_slice(&(-(h as i32)).to_le_bytes());
-        // biPlanes
+
         bmi[12..14].copy_from_slice(&1u16.to_le_bytes());
-        // biBitCount
+
         bmi[14..16].copy_from_slice(&24u16.to_le_bytes());
 
         let row_size = ((w * 3 + 3) & !3) as usize;
@@ -329,21 +326,19 @@ fn tool_screenshot() -> Value {
         DeleteDC(hdc_mem);
         ReleaseDC(std::ptr::null_mut(), hdc_screen);
 
-        // Build BMP file
         let file_size = 14 + 40 + img_size;
         let mut bmp = Vec::with_capacity(file_size);
-        // BMP file header (14 bytes)
+
         bmp.extend_from_slice(b"BM");
         bmp.extend_from_slice(&(file_size as u32).to_le_bytes());
-        bmp.extend_from_slice(&0u16.to_le_bytes()); // reserved
-        bmp.extend_from_slice(&0u16.to_le_bytes()); // reserved
-        bmp.extend_from_slice(&54u32.to_le_bytes()); // offset to pixel data
-        // BITMAPINFOHEADER
+        bmp.extend_from_slice(&0u16.to_le_bytes());
+        bmp.extend_from_slice(&0u16.to_le_bytes());
+        bmp.extend_from_slice(&54u32.to_le_bytes());
+
         bmp.extend_from_slice(&bmi[..40]);
-        // Pixel data
+
         bmp.extend_from_slice(&pixels);
 
-        // Base64 encode
         let b64 = base64_encode(&bmp);
         json!({
             "content": [{
@@ -534,7 +529,7 @@ fn tool_type_text(args: &Value) -> Value {
             if shift != 0 {
                 inputs.push(KeybdInput {
                     input_type: INPUT_KEYBOARD,
-                    vk: 0x10, // VK_SHIFT
+                    vk: 0x10,
                     scan: 0,
                     flags: 0,
                     time: 0,

@@ -23,8 +23,6 @@ lazy_static::lazy_static! {
     static ref CURRENT_CM_SESSION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 }
 
-/// Persistent direct IP access listener. Accepts connections in a loop
-/// on a fixed port when "direct-server" is enabled.
 pub fn run_direct_server(
     my_id: String,
     password: String,
@@ -35,7 +33,7 @@ pub fn run_direct_server(
         let enabled = cfg.get_option("direct-server");
         let service_stopped = cfg.get_option("stop-service") == "Y";
         if enabled.is_empty() || enabled == "N" || service_stopped {
-            // Not enabled or service stopped — check again in a few seconds
+
             std::thread::sleep(Duration::from_secs(3));
             continue;
         }
@@ -60,7 +58,7 @@ pub fn run_direct_server(
         listener.set_nonblocking(true).ok();
 
         loop {
-            // Check if still enabled or port changed
+
             let cfg2 = crate::config::Config2::load();
             let still_enabled = cfg2.get_option("direct-server");
             let service_stopped = cfg2.get_option("stop-service") == "Y";
@@ -165,7 +163,6 @@ pub fn run_session_public(
     let config_salt = config.salt.clone();
     let (signing_sk, signing_pk) = (config.key_pair.0.clone(), config.key_pair.1.clone());
 
-    // Generate ephemeral Curve25519 keypair for key exchange
     let (eph_sk, eph_pk) = crate::crypto::x25519_keypair();
 
     {
@@ -175,7 +172,7 @@ pub fn run_session_public(
         let id_pk_bytes = id_pk.write_to_bytes().map_err(io_err)?;
 
         let mut signed_id = message_proto::SignedId::new();
-        // Ed25519 sign: signed_id.id = signature(64) || id_pk_bytes (matches normal server)
+
         if signing_sk.len() == 64 {
             let mut sk_arr = [0u8; 64];
             sk_arr.copy_from_slice(&signing_sk);
@@ -193,7 +190,6 @@ pub fn run_session_public(
 
     stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
 
-    // Helper closure to process a PublicKey message and set up encryption
     let try_setup_encryption = |pk_msg: &message_proto::PublicKey, stream: &mut FramedStream, eph_sk: &[u8; 32]| {
         let their_pk = &pk_msg.asymmetric_value;
         let sealed_key = &pk_msg.symmetric_value;
@@ -231,7 +227,7 @@ pub fn run_session_public(
             crate::config::write_log(&format!("[server] Got Misc from client during handshake"));
 
             let mut resp = message_proto::UnauthenticatedInitialPublicKeyResponse::new();
-            // Send Ed25519 signing pk (not ephemeral Curve25519 pk) — client uses this to verify SignedId
+
             resp.unauthenticated_initial_public_key = signing_pk.clone().into();
             let mut misc_resp = message_proto::Misc::new();
             misc_resp.set_unauthenticated_initial_public_key_response(resp);
@@ -505,7 +501,6 @@ pub fn run_session_public(
         }
     }
 
-    // 2FA check
     if let Some(totp_secret) = crate::auth_2fa::get_2fa_secret() {
         crate::config::write_log("[server] 2FA enabled, sending 2FA Required");
         let mut resp_2fa = message_proto::LoginResponse::new();
@@ -516,7 +511,6 @@ pub fn run_session_public(
         msg_2fa.set_login_response(resp_2fa);
         stream.send_msg(&msg_2fa.write_to_bytes().map_err(io_err)?)?;
 
-        // Wait for Auth2FA message
         stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
         let mut tfa_verified = false;
         let mut tfa_attempts = 0;
@@ -584,7 +578,6 @@ pub fn run_session_public(
     });
     crate::config::write_log(&format!("[server] Session type: file_transfer={}, port_forward={}, terminal={}", is_file_transfer, is_port_forward, is_terminal));
 
-    // Check feature permissions
     let cfg2_perms = crate::config::Config2::load();
     if is_file_transfer && cfg2_perms.get_option("enable-file-transfer") == "N" {
         crate::config::write_log("[server] File transfer denied — disabled in settings");
@@ -663,7 +656,6 @@ pub fn run_session_public(
 
     crate::config::write_log(&format!("[server] Login successful, starting session"));
 
-    // Send initial permission states so controlling client knows what's allowed
     {
         let cfg2 = crate::config::Config2::load();
         let perms = [
@@ -851,7 +843,7 @@ fn run_video_input_loop(
                             break;
                         }
                     }
-                    // Handle Cliprdr (file clipboard) messages separately — may produce multiple replies
+
                     if let Some(message_proto::message::Union::Cliprdr(ref cliprdr)) = msg.union {
                         if clipboard_enabled {
                             let replies = crate::clipboard_file::handle_cliprdr_host(cliprdr);
@@ -873,7 +865,6 @@ fn run_video_input_loop(
             }
         }
 
-        // Process permission toggles from CM BEFORE clipboard check
         if let Ok(s) = CURRENT_CM_SESSION.lock() {
             if let Some(ref sid) = *s {
                 let path = cm::cm_perm_path(sid);
@@ -887,7 +878,6 @@ fn run_video_input_loop(
                             let enabled = parts[1] == "1";
                             crate::config::write_log(&format!("[server] Permission change: {}={}", perm_name, enabled));
 
-                            // Send PermissionInfo to controlling client (this is what it listens for)
                             let perm_enum = match perm_name {
                                 "keyboard" => Some(message_proto::permission_info::Permission::Keyboard),
                                 "clipboard" => Some(message_proto::permission_info::Permission::Clipboard),
@@ -910,7 +900,7 @@ fn run_video_input_loop(
                                 "clipboard" => {
                                     clipboard_enabled = enabled;
                                     if !enabled {
-                                        // Clear tracked clipboard so re-enabling doesn't immediately re-send
+
                                         last_clipboard_text.clear();
                                     }
                                 }
@@ -924,7 +914,7 @@ fn run_video_input_loop(
 
         if clipboard_enabled && last_clipboard_check.elapsed() >= clipboard_check_interval {
             last_clipboard_check = Instant::now();
-            // Check for file clipboard first (CF_HDROP takes priority)
+
             if let Some(msg) = crate::clipboard_file::check_clipboard_files_change() {
                 let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
             } else if let Some(msg) = crate::clipboard::check_clipboard_change(&mut last_clipboard_text) {
@@ -1229,7 +1219,7 @@ fn handle_misc(misc: &message_proto::Misc) -> Option<message_proto::Message> {
         }
         Some(message_proto::misc::Union::RestartRemoteDevice(_)) => {
             crate::config::write_log(&format!("[server] Restart requested by remote peer"));
-            // Check if remote restart is allowed (default-on: enabled unless "N")
+
             let restart_opt = crate::config::Config2::load().get_option("enable-remote-restart");
             if restart_opt == "N" {
                 crate::config::write_log("[server] Remote restart denied — disabled in settings");
@@ -1391,7 +1381,6 @@ fn run_port_forward_loop(
 
         let mut had_data = false;
 
-        // Remote client → target service (raw bytes)
         match stream.recv_msg() {
             Ok(data) => {
                 if data.is_empty() { break; }
@@ -1404,7 +1393,6 @@ fn run_port_forward_loop(
             Err(_) => break,
         }
 
-        // Target service → remote client (raw bytes)
         match std::io::Read::read(&mut target, &mut buf) {
             Ok(0) => break,
             Ok(n) => {

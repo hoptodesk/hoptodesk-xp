@@ -222,7 +222,6 @@ fn link_device_inner() -> Result<(), String> {
         ));
     }
 
-    // Clear invite code after successful linking
     let mut cfg2 = Config2::load();
     cfg2.set_option("invite_code", "");
     cfg2.save();
@@ -292,7 +291,7 @@ fn get_timezone() -> String {
     if let Ok(tz) = std::env::var("TZ") {
         return tz;
     }
-    // On XP, fall back to UTC offset via Win32 GetTimeZoneInformation
+
     #[repr(C)]
     struct TimeZoneInformation {
         bias: i32,
@@ -401,13 +400,11 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
     let mut ws = WssClient::connect(DASHBOARD_WS_HOST, 443, &path)
         .map_err(|e| format!("WSS connect failed: {}", e))?;
 
-    // Read Engine.IO open packet
     let open_msg = ws.recv_text().map_err(|e| format!("WS read open: {}", e))?;
     if !open_msg.starts_with('0') {
         return Err(format!("Expected Engine.IO open packet, got: {}", open_msg));
     }
 
-    // Join /device namespace
     ws.send_text("40/device,").map_err(|e| format!("WS send ns join: {}", e))?;
 
     let ack_msg = ws.recv_text().map_err(|e| format!("WS read ns ack: {}", e))?;
@@ -415,7 +412,6 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
         return Err(format!("Expected namespace ACK, got: {}", ack_msg));
     }
 
-    // Register device
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();
     let computer_name = hostname();
@@ -438,7 +434,6 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
 
     config::write_log("[dashboard] WebSocket connected and registered");
 
-    // Set read timeout for the main loop
     ws.set_read_timeout(Some(Duration::from_secs(HEARTBEAT_INTERVAL_SECS + 5)))
         .map_err(|e| format!("set_read_timeout: {}", e))?;
 
@@ -447,17 +442,16 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
     let mut was_in_session = false;
 
     loop {
-        // Try to read a message (will timeout after HEARTBEAT_INTERVAL + 5s)
+
         match ws.recv_text() {
             Ok(text) => {
                 last_ws_data = Instant::now();
 
-                // Engine.IO ping
                 if text == "2" {
                     ws.send_text("3").map_err(|e| format!("WS pong failed: {}", e))?;
                     continue;
                 }
-                // Engine.IO pong
+
                 if text == "3" {
                     continue;
                 }
@@ -469,7 +463,7 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
             Err(e) => {
                 let kind = e.kind();
                 if kind == std::io::ErrorKind::WouldBlock || kind == std::io::ErrorKind::TimedOut {
-                    // Timeout — check if we've gone too long without any data
+
                     if last_ws_data.elapsed() > Duration::from_secs(WS_READ_TIMEOUT_SECS) {
                         config::write_log(&format!(
                             "[dashboard] No data for {}s, reconnecting",
@@ -483,11 +477,9 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
             }
         }
 
-        // Send heartbeat if interval has elapsed
         if last_heartbeat.elapsed() >= Duration::from_secs(HEARTBEAT_INTERVAL_SECS) {
             let current_in_session = IN_SESSION.load(Ordering::Relaxed);
 
-            // Session start/end events
             if current_in_session && !was_in_session {
                 let (stype, rip) = SESSION_META.lock().unwrap().clone();
                 let session_start = serde_json::json!({
@@ -530,15 +522,12 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Start the dashboard background thread.
-/// Called from main.rs after UI is up.
 pub fn start() {
     if DASHBOARD_RUNNING.swap(true, Ordering::SeqCst) {
         config::write_log("[dashboard] Already running");
         return;
     }
 
-    // If there's an invite code, link now
     if !get_invite_code().is_empty() {
         match link_device() {
             Ok(()) => config::write_log("[dashboard] Device linked successfully"),
@@ -553,7 +542,7 @@ pub fn start() {
     let dashboard_user_id = get_dashboard_user_id();
     if dashboard_user_id.is_empty() {
         config::write_log("[dashboard] No dashboard_user_id, not starting WebSocket");
-        // Still check for new invite codes periodically
+
         loop {
             std::thread::sleep(Duration::from_secs(10));
             let code = get_invite_code();
@@ -561,7 +550,7 @@ pub fn start() {
                 match link_device() {
                     Ok(()) => {
                         config::write_log("[dashboard] Device linked via UI code");
-                        break; // Fall through to WebSocket loop
+                        break;
                     }
                     Err(e) => config::write_log(&format!(
                         "[dashboard] Failed to link device via UI code: {}",
@@ -604,7 +593,6 @@ pub fn start() {
         std::thread::sleep(Duration::from_secs(reconnect_delay));
         reconnect_delay = (reconnect_delay * 2).min(RECONNECT_DELAY_MAX_SECS);
 
-        // Check for new invite code during reconnect
         let code = get_invite_code();
         if !code.is_empty() && !is_linked() {
             if let Ok(()) = link_device() {
@@ -663,8 +651,6 @@ pub fn percent_decode_path(s: &str) -> String {
     }
     String::from_utf8_lossy(&result).to_string()
 }
-
-// --- Ticket functions ---
 
 pub fn submit_ticket(
     email: &str,

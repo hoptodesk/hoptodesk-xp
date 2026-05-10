@@ -6,17 +6,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-/// Check if target looks like a direct IP:port address (e.g. "192.168.1.5:21118")
 fn is_direct_ip(target: &str) -> bool {
-    // Must contain a dot (IP address) and a colon (port separator)
+
     if let Some(colon) = target.rfind(':') {
         let host = &target[..colon];
         let port = &target[colon + 1..];
-        // Port must be numeric
+
         if port.parse::<u16>().is_err() {
             return false;
         }
-        // Host must look like an IP (contains dots) or be a hostname (not purely numeric ID)
+
         host.contains('.') || host.contains(':')
     } else {
         false
@@ -143,7 +142,6 @@ pub fn run_connect_process(target_id: &str, peer_password: &str, is_file_transfe
             s.status = "connecting".into();
         }
 
-        // Direct IP:port connection — bypass signal server
         if is_direct_ip(&target) {
             crate::config::write_log(&format!("[connect] Direct IP connection to {}", crate::config::mask_ip(&target)));
             if ft {
@@ -1390,7 +1388,6 @@ unsafe fn render_frame_gdi(hwnd: sciter::types::HWINDOW, bgra: &[u8], width: i32
     let hdc = GetDC(video);
     if hdc.is_null() { return; }
 
-    // Calculate aspect-ratio-preserving destination rectangle
     let scale_x = client_w as f64 / width as f64;
     let scale_y = client_h as f64 / height as f64;
     let scale = if scale_x < scale_y { scale_x } else { scale_y };
@@ -1399,21 +1396,17 @@ unsafe fn render_frame_gdi(hwnd: sciter::types::HWINDOW, bgra: &[u8], width: i32
     let offset_x = (client_w - dest_w) / 2;
     let offset_y = (client_h - dest_h) / 2;
 
-    // Store for mouse coordinate mapping
     VIDEO_OFFSET_X = offset_x;
     VIDEO_OFFSET_Y = offset_y;
     VIDEO_SCALE_W = dest_w;
     VIDEO_SCALE_H = dest_h;
 
-    // Fill background with dark color (#0F172A) for letterbox bars
-    // GDI COLORREF is 0x00BBGGRR
     let brush = CreateSolidBrush(0x002A170F);
     let bg_rect = [0i32, 0, client_w, client_h];
     FillRect(hdc, &bg_rect, brush);
     DeleteObject(brush);
 
-    // Use HALFTONE stretch mode for better quality downscaling
-    SetStretchBltMode(hdc, 4); // HALFTONE = 4
+    SetStretchBltMode(hdc, 4);
 
     let mut bmi = [0u8; 40];
     bmi[0..4].copy_from_slice(&40u32.to_le_bytes());

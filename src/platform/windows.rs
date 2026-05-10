@@ -416,7 +416,6 @@ pub fn get_clipboard_file_paths() -> Option<Vec<String>> {
             return None;
         }
 
-        // DROPFILES header: pFiles(4) + pt.x(4) + pt.y(4) + fNC(4) + fWide(4) = 20 bytes
         let p_files = *(ptr as *const u32) as usize;
         let f_wide = *(ptr.add(16) as *const i32);
 
@@ -480,16 +479,13 @@ pub fn set_clipboard_files(paths: &[String]) -> bool {
         return false;
     }
 
-    // Build DROPFILES structure
-    // Header: 20 bytes (pFiles=20, pt=(0,0), fNC=0, fWide=1)
-    // Then double-null-terminated list of wide strings
     let mut wide_data: Vec<u16> = Vec::new();
     for path in paths {
         let wide: Vec<u16> = path.encode_utf16().collect();
         wide_data.extend_from_slice(&wide);
-        wide_data.push(0); // null terminator for this string
+        wide_data.push(0);
     }
-    wide_data.push(0); // double null terminator
+    wide_data.push(0);
 
     let header_size = 20usize;
     let total_size = header_size + wide_data.len() * 2;
@@ -512,12 +508,10 @@ pub fn set_clipboard_files(paths: &[String]) -> bool {
             return false;
         }
 
-        // DROPFILES header
-        *(ptr as *mut u32) = header_size as u32; // pFiles
-        // pt.x, pt.y, fNC already zero from GMEM_ZEROINIT
-        *(ptr.add(16) as *mut i32) = 1; // fWide = TRUE
+        *(ptr as *mut u32) = header_size as u32;
 
-        // Copy wide string data
+        *(ptr.add(16) as *mut i32) = 1;
+
         let dest = ptr.add(header_size) as *mut u16;
         std::ptr::copy_nonoverlapping(wide_data.as_ptr(), dest, wide_data.len());
 

@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 
 const DEFAULT_API_HOST: &str = "api.hoptodesk.com";
 
-/// Returns the custom network URL if set, otherwise the default API URL.
 pub fn get_api_url() -> String {
     let custom = crate::config::Config2::load().get_option("custom-rendezvous-server");
     if !custom.is_empty() {
@@ -20,37 +19,30 @@ pub fn get_api_url() -> String {
     format!("https://{}/", DEFAULT_API_HOST)
 }
 
-/// Fetch from API URL, trying HTTPS first then falling back to HTTP.
 pub fn api_get() -> Result<String, String> {
     let custom = crate::config::Config2::load().get_option("custom-rendezvous-server");
     if !custom.is_empty() {
         crate::config::write_log(&format!("[api] Using custom URL: {}", custom));
         return crate::wininet::http_get(&custom);
     }
-    // Try HTTPS first, fall back to HTTP if empty or error
+
     let https_url = format!("https://{}/", DEFAULT_API_HOST);
     crate::config::write_log(&format!("[api] Fetching {}", https_url));
-    let https_result = crate::wininet::http_get(&https_url);
-    let use_https = match &https_result {
+    match crate::wininet::http_get(&https_url) {
         Ok(body) if !body.is_empty() => {
             crate::config::write_log(&format!("[api] HTTPS OK ({} bytes)", body.len()));
-            true
+            Ok(body)
         }
         Ok(_) => {
-            crate::config::write_log("[api] HTTPS returned empty response, falling back to HTTP");
-            false
+            let msg = "HTTPS returned empty response";
+            crate::config::write_log(&format!("[api] {}", msg));
+            Err(msg.to_string())
         }
         Err(e) => {
             crate::config::write_log(&format!("[api] HTTPS failed: {}", e));
-            false
+            Err(e)
         }
-    };
-    if use_https {
-        return https_result;
     }
-    let http_url = format!("http://{}/", DEFAULT_API_HOST);
-    crate::config::write_log(&format!("[api] Fetching {}", http_url));
-    crate::wininet::http_get(&http_url)
 }
 const HEALTHCHECK: &str = r#"{"protocol":"one-to-self","data":"healthcheck"}"#;
 const HEALTHCHECK_TIMEOUT: u64 = 90;
@@ -141,6 +133,7 @@ pub fn run_signal_loop(
             state.status = "connecting".to_string();
             state.error.clear();
         }
+        crate::cm::write_service_status("connecting");
 
         match run_signal_once(&my_id, &password, &pk, &signal_state) {
             Ok(()) => {
@@ -151,6 +144,7 @@ pub fn run_signal_loop(
                     state.status = "offline".to_string();
                     state.error = e.clone();
                 }
+                crate::cm::write_service_status("offline");
                 crate::config::write_log(&format!("[signal] Error: {}", e));
             }
         }
@@ -193,6 +187,7 @@ fn run_signal_once(
         state.ws_port = port;
         state.error.clear();
     }
+    crate::cm::write_service_status("online");
     crate::config::write_log(&format!("[signal] Connected and online"));
 
     ws.set_read_timeout(Some(Duration::from_secs(5)))
@@ -320,7 +315,6 @@ fn handle_connect_request(
 ) {
     let sender_id = cr.sender_id.clone();
 
-    // Check if incoming connections are disabled
     let cfg = crate::config::Config2::load();
     if cfg.get_option("stop-service") == "Y" {
         crate::config::write_log(&format!("[signal] Rejecting connection from {} — incoming connections disabled", sender_id));

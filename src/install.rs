@@ -307,6 +307,42 @@ fn start_service() -> Result<(), String> {
     run_cmd("sc-start", "sc", &["start", SERVICE_NAME])
 }
 
+const RUN_KEY: &str = "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+fn register_run_key(install_path: &Path) {
+    let exe = install_path.join(EXE_NAME);
+    let exe_str = exe.to_string_lossy().replace('/', "\\");
+    let value = format!("\"{}\" --tray", exe_str);
+    let _ = run_cmd(
+        "reg-add-run",
+        "reg",
+        &[
+            "add", RUN_KEY, "/f", "/v", APP_NAME, "/t", "REG_SZ", "/d", &value,
+        ],
+    );
+}
+
+fn delete_run_key() {
+    let _ = silent_cmd("reg")
+        .args(["delete", RUN_KEY, "/f", "/v", APP_NAME])
+        .output();
+}
+
+fn spawn_tray_for_current_user(install_path: &Path) {
+    use std::process::Stdio;
+    let exe = install_path.join(EXE_NAME);
+    crate::config::write_log(&format!(
+        "[install] spawning tray for current user: {} --tray",
+        exe.display()
+    ));
+    let _ = silent_cmd(exe.to_string_lossy().as_ref())
+        .arg("--tray")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
 fn add_firewall_rule(install_path: &Path) {
     let exe = install_path.join(EXE_NAME);
     let exe_str = exe.to_string_lossy().replace('/', "\\");
@@ -474,6 +510,13 @@ pub fn install_me(args: &str, custom_path: &str) -> Result<(), String> {
         crate::config::write_log(&format!("[install] restart service warning: {}", e));
     }
 
+    let runtime = crate::cm::cm_temp_dir();
+    crate::config::write_log(&format!("[install] runtime dir: {}", runtime.display()));
+    crate::cm::cleanup_runtime_dir();
+
+    register_run_key(&install_path);
+    spawn_tray_for_current_user(&install_path);
+
     crate::config::write_log("[install] install_me complete");
     Ok(())
 }
@@ -485,6 +528,8 @@ pub fn uninstall_me() -> Result<(), String> {
 
     unregister_service()?;
     crate::config::write_log("[install] service unregistered");
+    delete_run_key();
+    crate::config::write_log("[install] Run key removed");
     remove_firewall_rule();
     crate::config::write_log("[install] firewall rule removed");
     delete_shortcuts();
@@ -730,6 +775,7 @@ fn run_service_workload(_stop: Arc<AtomicBool>) {
     crate::config::write_log("[service] workload starting (signal + direct server)");
     unsafe { attach_to_interactive_desktop(); }
     crate::config::migrate_old_config();
+    crate::cm::cleanup_runtime_dir();
     let cfg = crate::config::Config::load();
     let my_id = cfg.id.clone();
     let password = cfg.password.clone();

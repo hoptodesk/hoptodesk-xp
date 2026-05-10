@@ -38,7 +38,47 @@ fn string_to_rgb(name: &str) -> String {
 }
 
 pub fn cm_temp_dir() -> PathBuf {
-    std::env::temp_dir()
+    if let Some(shared) = crate::config::shared_app_dir_pub() {
+        let runtime = shared.join("runtime");
+        let need_create = !runtime.exists();
+        if std::fs::create_dir_all(&runtime).is_ok() {
+            if need_create {
+                make_users_writable(&runtime);
+            }
+            return runtime;
+        }
+    }
+    let fallback = std::env::temp_dir();
+    crate::config::write_log(&format!(
+        "[cm] WARNING: shared runtime dir unavailable, falling back to {}",
+        fallback.display()
+    ));
+    fallback
+}
+
+pub fn service_status_path() -> PathBuf {
+    cm_temp_dir().join("service_status.txt")
+}
+
+pub fn write_service_status(status: &str) {
+    let path = service_status_path();
+    let _ = std::fs::write(&path, status);
+    make_users_writable(&path);
+}
+
+pub fn read_service_status() -> Option<String> {
+    std::fs::read_to_string(service_status_path()).ok().map(|s| s.trim().to_string())
+}
+
+fn make_users_writable(path: &std::path::Path) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let p = path.to_string_lossy();
+    let _ = std::process::Command::new("cacls")
+        .arg(p.as_ref())
+        .args(["/e", "/g", "Users:M"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
 }
 
 pub fn cm_info_path(session_id: &str) -> PathBuf {
@@ -58,16 +98,21 @@ pub fn cm_connected_path(session_id: &str) -> PathBuf {
 }
 
 pub fn signal_cm_connected(session_id: &str) {
-    let _ = std::fs::write(cm_connected_path(session_id), "connected");
+    let path = cm_connected_path(session_id);
+    let _ = std::fs::write(&path, "connected");
+    make_users_writable(&path);
 }
 
 pub fn write_cm_info(session_id: &str, peer_id: &str, peer_name: &str, peer_platform: &str) {
-    let info = format!(
-        r#"{{"peer_id":"{}","peer_name":"{}","peer_platform":"{}"}}"#,
-        peer_id, peer_name, peer_platform
-    );
+    let info = serde_json::json!({
+        "peer_id": peer_id,
+        "peer_name": peer_name,
+        "peer_platform": peer_platform,
+    })
+    .to_string();
     let path = cm_info_path(session_id);
     let _ = std::fs::write(&path, &info);
+    make_users_writable(&path);
     crate::config::write_log(&format!("[cm] Wrote peer info to {}", path.display()));
 }
 
@@ -92,8 +137,12 @@ pub fn cm_chat_send_path(session_id: &str) -> PathBuf {
 pub fn append_chat_message(session_id: &str, from: &str, text: &str) {
     use std::io::Write;
     let path = cm_chat_path(session_id);
+    let new_file = !path.exists();
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(f, "{}:{}", from, text);
+    }
+    if new_file {
+        make_users_writable(&path);
     }
 }
 
@@ -106,8 +155,37 @@ pub fn cm_ended_path(session_id: &str) -> PathBuf {
 }
 
 pub fn signal_cm_ended(session_id: &str) {
-    let _ = std::fs::write(cm_ended_path(session_id), "ended");
+    let path = cm_ended_path(session_id);
+    let _ = std::fs::write(&path, "ended");
+    make_users_writable(&path);
     crate::config::write_log(&format!("[cm] Wrote session-ended signal for {}", session_id));
+}
+
+pub fn cleanup_runtime_dir() {
+    let dir = cm_temp_dir();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let name = match entry.file_name().into_string() {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if name.starts_with("hoptodesk_cm_") {
+            if std::fs::remove_file(entry.path()).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    if removed > 0 {
+        crate::config::write_log(&format!(
+            "[cm] cleaned up {} stale CM file(s) in {}",
+            removed,
+            dir.display()
+        ));
+    }
 }
 
 pub fn cleanup_cm_files(session_id: &str) {
@@ -122,43 +200,48 @@ pub fn cleanup_cm_files(session_id: &str) {
 }
 
 pub fn spawn_cm_process(session_id: &str) {
-    use std::process::Stdio;
-    let exe = std::env::current_exe().unwrap_or_default();
-    crate::config::write_log(&format!("[cm] Spawning: {} --cm {}", exe.display(), session_id));
-    match std::process::Command::new(&exe)
-        .args(["--cm", session_id])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(_) => {},
-        Err(e) => crate::config::write_log(&format!("[cm] Spawn failed: {}", e)),
-    }
+    crate::config::write_log(&format!(
+        "[cm] CM info written for session {}; user-session tray will spawn the dialog",
+        session_id
+    ));
 }
 
 fn read_peer_info(session_id: &str) -> (String, String, String) {
     let path = cm_info_path(session_id);
-    if let Ok(data) = std::fs::read_to_string(&path) {
-
-        let peer_id = extract_json_field(&data, "peer_id");
-        let peer_name = extract_json_field(&data, "peer_name");
-        let peer_platform = extract_json_field(&data, "peer_platform");
-        (peer_id, peer_name, peer_platform)
-    } else {
-        ("Unknown".into(), "Unknown".into(), "Unknown".into())
-    }
+    let data = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return ("Unknown".into(), "Unknown".into(), "Unknown".into()),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&data) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::config::write_log(&format!("[cm] read_peer_info: bad JSON: {}", e));
+            return ("Unknown".into(), "Unknown".into(), "Unknown".into());
+        }
+    };
+    let take = |k: &str| {
+        parsed
+            .get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    (take("peer_id"), take("peer_name"), take("peer_platform"))
 }
 
-fn extract_json_field(json: &str, field: &str) -> String {
-    let key = format!("\"{}\":\"", field);
-    if let Some(start) = json.find(&key) {
-        let val_start = start + key.len();
-        if let Some(end) = json[val_start..].find('"') {
-            return json[val_start..val_start + end].to_string();
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
         }
     }
-    String::new()
+    out
 }
 
 pub fn run_cm_process(session_id: &str) {
@@ -178,12 +261,17 @@ pub fn run_cm_process(session_id: &str) {
     let avatar_color = string_to_rgb(display_name);
     let avatar_letter = display_name.chars().next().unwrap_or('?').to_uppercase().to_string();
 
+    let safe_id = html_escape(&display_id);
+    let safe_name = html_escape(display_name);
+    let safe_platform = html_escape(&peer_platform);
+    let safe_letter = html_escape(&avatar_letter);
+
     let html = html_template
-        .replace("__PEER_ID__", &display_id)
-        .replace("__PEER_NAME__", display_name)
-        .replace("__PEER_PLATFORM__", &peer_platform)
+        .replace("__PEER_ID__", &safe_id)
+        .replace("__PEER_NAME__", &safe_name)
+        .replace("__PEER_PLATFORM__", &safe_platform)
         .replace("__AVATAR_COLOR__", &avatar_color)
-        .replace("__AVATAR_LETTER__", &avatar_letter);
+        .replace("__AVATAR_LETTER__", &safe_letter);
 
     frame.load_html(html.as_bytes(), Some("this://app/cm.html"));
     frame.set_title("HopToDesk - Incoming Connection");

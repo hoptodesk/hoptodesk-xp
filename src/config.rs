@@ -669,21 +669,10 @@ pub fn generate_secure_random_bytes(len: usize) -> Option<Vec<u8>> {
 }
 
 pub fn generate_random_string(len: usize) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let mut seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-    seed = seed
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(std::process::id() as u64);
-
+    let bytes = generate_random_bytes(len);
     let mut result = String::with_capacity(len);
-    for _ in 0..len {
-        seed = seed
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        let idx = ((seed >> 33) as usize) % CHARS.len();
+    for b in bytes {
+        let idx = (b as usize) & (CHARS.len() - 1);
         result.push(CHARS[idx] as char);
     }
     result

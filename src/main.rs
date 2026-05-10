@@ -26,6 +26,7 @@ mod remote_handler;
 mod server;
 mod signal;
 mod terminal_service;
+mod tray;
 mod turn;
 mod ui_handler;
 mod vpx;
@@ -33,9 +34,6 @@ mod websocket;
 mod tls_client;
 mod wininet;
 
-// Force sciter.dll into the import table (so XP's loader allocates TLS
-// correctly; see build.rs). sciter.dll must sit next to HopToDesk.exe at
-// launch — the launcher bin (src/bin/launcher.rs) handles that.
 extern "C" {
     fn SciterAPI() -> *const std::ffi::c_void;
 }
@@ -108,8 +106,7 @@ impl MainHandler {
     }
 
     fn run_without_install(&self) {
-        // No-op: closing the install dialog drops the user back to the
-        // running portable UI, which is "running without install".
+
     }
 
     fn is_installed_daemon(&self, _prompt: bool) -> bool {
@@ -125,7 +122,7 @@ impl MainHandler {
             match crate::install::install_me(&args, &install_path) {
                 Ok(()) => {
                     crate::config::write_log("[handler] install completed; exiting UI process");
-                    // Service is running now; user can launch from Start Menu.
+
                     std::process::exit(0);
                 }
                 Err(e) => {
@@ -137,8 +134,7 @@ impl MainHandler {
 
     fn goto_install(&self) {
         crate::config::write_log("[handler] goto_install invoked");
-        // Run everything in a background thread so the Sciter UI thread
-        // stays responsive while the MessageBox + install work happens.
+
         std::thread::spawn(|| {
             let install_path = crate::install::default_install_path();
             let confirm = format!(
@@ -150,8 +146,6 @@ impl MainHandler {
                 return;
             }
 
-            // Install with the default options: both start-menu and
-            // desktop-icon shortcuts enabled, default install path.
             match crate::install::install_me("startmenu desktopicon", "") {
                 Ok(()) => {
                     crate::config::write_log("[handler] install completed; exiting UI process");
@@ -253,11 +247,6 @@ pub fn format_id(id: &str) -> String {
     }
 }
 
-// sciter.dll is in this exe's PE import table and must be on disk at
-// launch. The launcher bin (src/bin/launcher.rs) gets both files into
-// %APPDATA%\HopToDesk\ before CreateProcessW'ing this exe, giving end
-// users a single-file download while keeping XP's loader happy.
-
 #[cfg(target_os = "windows")]
 fn relocate_from_temp_if_needed() {
     use std::path::PathBuf;
@@ -268,16 +257,12 @@ fn relocate_from_temp_if_needed() {
     };
     let current_path_str = current_exe.to_string_lossy().to_lowercase();
 
-    // Heuristic: we're in a temp extraction if the path lies under the
-    // user's TEMP dir (or contains "\\temp\\" as a defensive fallback).
     let temp_dir = std::env::temp_dir().to_string_lossy().to_lowercase();
     let in_temp = !temp_dir.is_empty() && current_path_str.starts_with(&temp_dir);
     if !in_temp {
         return;
     }
 
-    // Target: %APPDATA%\HopToDesk\HopToDesk.exe (+ sciter.dll next to it).
-    // %APPDATA% is defined on XP through Win11.
     let appdata = match std::env::var("APPDATA") {
         Ok(v) if !v.is_empty() => PathBuf::from(v),
         _ => return,
@@ -287,7 +272,6 @@ fn relocate_from_temp_if_needed() {
     let target_exe = target_dir.join("HopToDesk.exe");
     let target_dll = target_dir.join("sciter.dll");
 
-    // Copy exe + sciter.dll if missing or size-mismatched.
     let cur_len = std::fs::metadata(&current_exe).ok().map(|m| m.len()).unwrap_or(0);
     let tgt_len = std::fs::metadata(&target_exe).ok().map(|m| m.len()).unwrap_or(0);
     if cur_len == 0 || cur_len != tgt_len {
@@ -302,7 +286,6 @@ fn relocate_from_temp_if_needed() {
         }
     }
 
-    // sciter.dll lives next to the temp exe; copy it if target is missing or different.
     if let Some(src_dir) = current_exe.parent() {
         let src_dll = src_dir.join("sciter.dll");
         let src_dll_len = std::fs::metadata(&src_dll).ok().map(|m| m.len()).unwrap_or(0);
@@ -320,14 +303,12 @@ fn relocate_from_temp_if_needed() {
         }
     }
 
-    // Clean up old SFX extractions in %TEMP% (best-effort, ignore errors).
-    // Match patterns like "7zS*" which 7-Zip SFX uses.
     if let Ok(entries) = std::fs::read_dir(&std::env::temp_dir()) {
         for entry in entries.flatten() {
             let p = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with("7zS") || name.starts_with("7z") {
-                // Skip the dir we're currently running from; it's locked anyway.
+
                 if current_exe.parent().map(|cp| cp == p).unwrap_or(false) {
                     continue;
                 }
@@ -336,7 +317,6 @@ fn relocate_from_temp_if_needed() {
         }
     }
 
-    // Relaunch from the stable path and exit.
     crate::config::write_log(&format!("[main] Relaunching from {}", target_exe.display()));
     let args_forward: Vec<String> = std::env::args().skip(1).collect();
     match std::process::Command::new(&target_exe).args(&args_forward).spawn() {
@@ -380,17 +360,6 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     crate::config::write_log(&format!("[main] CLI args: {:?}", args));
 
-    // Self-relocate when the SFX dumped us into a temp dir. The 7-Zip SFX
-    // config tries to extract to %APPDATA%\HopToDesk, but the stub used
-    // here (7zSD-hoptodesk.sfx in silent GUIMode) ignores ExtractPathText
-    // on some Windows versions and extracts to %TEMP%\7z* instead. To keep
-    // one stable exe path (so firewall rules / install detection work),
-    // we detect that and copy ourselves + sciter.dll into a fixed user
-    // dir, then relaunch from there.
-    //
-    // Only applies to the main UI launch; subprocess CLI modes (--connect,
-    // --cm, --service, etc.) are invoked with current_exe() from the
-    // already-relocated parent, so they'll already be in the stable dir.
     #[cfg(target_os = "windows")]
     if args.len() < 2 || !args[1].starts_with("--") {
         relocate_from_temp_if_needed();
@@ -485,6 +454,10 @@ fn main() {
                 install::run_as_service();
                 std::process::exit(0);
             }
+            "--tray" => {
+                tray::start();
+                std::process::exit(0);
+            }
             "--install" => {
                 let install_args = args.get(2).cloned().unwrap_or_default();
                 let install_path = args.get(3).cloned().unwrap_or_default();
@@ -575,7 +548,6 @@ fn run_headless_server() {
     crate::config::write_log(&format!("[server] Starting headless server, ID={}", my_id));
     crate::config::write_log(&format!("[server] Press Ctrl+C to stop"));
 
-    // Start direct IP access server in background
     {
         let my_id = my_id.clone();
         let password = password.clone();
@@ -673,42 +645,60 @@ fn run_main_ui() {
         (s.config.id.clone(), s.config.password.clone())
     };
 
-    {
+    let service_running = install::is_installed();
+    if service_running {
+        crate::config::write_log("[main] service is installed; UI will read status from service rather than running its own loops");
         let state_clone = state.clone();
         thread::spawn(move || {
-            let (my_id, password, pk, signal_state) = {
-                let s = state_clone.lock().unwrap();
-                (
-                    s.config.id.clone(),
-                    s.config.password.clone(),
-                    s.config.key_pair.1.clone(),
-                    s.signal_state.clone(),
-                )
-            };
-            signal::run_signal_loop(my_id, password, pk, signal_state);
+            loop {
+                let status = cm::read_service_status().unwrap_or_else(|| "offline".into());
+                if let Ok(s) = state_clone.lock() {
+                    if let Ok(mut sig) = s.signal_state.lock() {
+                        if sig.status != status {
+                            sig.status = status.clone();
+                            sig.error.clear();
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        });
+    } else {
+        {
+            let state_clone = state.clone();
+            thread::spawn(move || {
+                let (my_id, password, pk, signal_state) = {
+                    let s = state_clone.lock().unwrap();
+                    (
+                        s.config.id.clone(),
+                        s.config.password.clone(),
+                        s.config.key_pair.1.clone(),
+                        s.signal_state.clone(),
+                    )
+                };
+                signal::run_signal_loop(my_id, password, pk, signal_state);
+            });
+        }
+
+        {
+            let state_clone = state.clone();
+            thread::spawn(move || {
+                let (my_id, password, pk) = {
+                    let s = state_clone.lock().unwrap();
+                    (
+                        s.config.id.clone(),
+                        s.config.password.clone(),
+                        s.config.key_pair.1.clone(),
+                    )
+                };
+                server::run_direct_server(my_id, password, pk);
+            });
+        }
+
+        thread::spawn(|| {
+            dashboard::start();
         });
     }
-
-    // Start direct IP access server thread
-    {
-        let state_clone = state.clone();
-        thread::spawn(move || {
-            let (my_id, password, pk) = {
-                let s = state_clone.lock().unwrap();
-                (
-                    s.config.id.clone(),
-                    s.config.password.clone(),
-                    s.config.key_pair.1.clone(),
-                )
-            };
-            server::run_direct_server(my_id, password, pk);
-        });
-    }
-
-    // Start dashboard background thread
-    thread::spawn(|| {
-        dashboard::start();
-    });
 
     sciter::set_options(sciter::RuntimeOptions::GfxLayer(sciter::GFX_LAYER::CPU)).ok();
 
@@ -763,8 +753,6 @@ fn run_main_ui() {
         (pj, oj)
     };
 
-    // Bake the right Install / Uninstall button visibility into the HTML at
-    // load time so neither button flashes before the polling timer settles.
     let is_installed_now = crate::install::is_installed();
     let (install_style, uninstall_style) = if is_installed_now {
         ("display:none; margin-left:16px;", "display:inline-block; margin-left:16px;")
@@ -875,8 +863,6 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
-    // Keep the Install / Uninstall button visibility in sync with install state.
-    // Install shown only when NOT installed; Uninstall shown only WHEN installed.
     {
         let installed = crate::install::is_installed();
         if let Ok(Some(mut btn)) = root.find_first("#install-btn") {
@@ -893,7 +879,6 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
-    // Polled Install button trigger: UI writes "go" into #install-trigger on click.
     if let Ok(Some(mut el)) = root.find_first("#install-trigger") {
         let val = el.get_text();
         if !val.is_empty() {
@@ -929,9 +914,6 @@ unsafe extern "system" fn main_timer_callback(
             });
         }
     }
-
-    // Uninstall is no longer surfaced in the UI — the Start Menu shortcut
-    // (or Add/Remove Programs) invokes `HopToDesk.exe --uninstall` directly.
 
     if let Ok(Some(mut el)) = root.find_first("#connect-target") {
         let target = el.get_text();
@@ -1137,18 +1119,15 @@ unsafe extern "system" fn main_timer_callback(
                 s.local_config.save();
             }
 
-            // Update translations JSON so TIS can re-translate
             let tr_json = build_ui_translations();
             if let Ok(Some(mut tr_el)) = root.find_first("#tr-data") {
                 let _ = tr_el.set_text(&tr_json);
             }
 
-            // Update current lang code
             if let Ok(Some(mut code_el)) = root.find_first("#current-lang-code") {
                 let _ = code_el.set_text(&text);
             }
 
-            // Trigger TIS re-translation
             if let Ok(Some(body)) = root.find_first("body") {
                 let _ = body.eval_script("try { initTranslations(); applyTranslations(); } catch(e) {}");
             }
@@ -1168,7 +1147,6 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
-    // 2FA generate
     if let Ok(Some(mut el)) = root.find_first("#2fa-generate-flag") {
         let text = el.get_text();
         if !text.is_empty() {
@@ -1187,7 +1165,6 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
-    // 2FA verify
     if let Ok(Some(mut el)) = root.find_first("#2fa-verify-flag") {
         let code = el.get_text();
         if !code.is_empty() {
@@ -1204,7 +1181,6 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
-    // 2FA disable
     if let Ok(Some(mut el)) = root.find_first("#2fa-disable-flag") {
         let text = el.get_text();
         if !text.is_empty() {
@@ -1216,7 +1192,6 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
-    // Custom network URL
     if let Ok(Some(mut el)) = root.find_first("#set-custom-api-flag") {
         let text = el.get_text();
         if !text.is_empty() {
@@ -1229,7 +1204,6 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
-    // Invite code
     if let Ok(Some(mut el)) = root.find_first("#set-invite-code-flag") {
         let text = el.get_text();
         if !text.is_empty() {
@@ -1242,7 +1216,6 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
-    // Open ticket portal in a separate process
     if let Ok(Some(mut el)) = root.find_first("#open-ticket-flag") {
         let text = el.get_text();
         if !text.is_empty() {

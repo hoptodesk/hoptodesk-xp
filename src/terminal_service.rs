@@ -43,6 +43,8 @@ struct TerminalSession {
     child: Arc<Mutex<Option<Child>>>,
     input_tx: Option<SyncSender<Vec<u8>>>,
     output_rx: Receiver<Vec<u8>>,
+    output_tx_echo: Option<SyncSender<Vec<u8>>>,
+    line_buffer: String,
     exiting: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
     writer: Option<JoinHandle<()>>,
@@ -157,6 +159,7 @@ fn spawn_terminal(terminal_id: i32) -> io::Result<TerminalSession> {
     let stderr_reader = {
         let mut stderr = stderr;
         let exiting = exiting.clone();
+        let output_tx = output_tx.clone();
         thread::spawn(move || {
             let mut buf = vec![0u8; READ_BUF_SIZE];
             loop {
@@ -179,12 +182,36 @@ fn spawn_terminal(terminal_id: i32) -> io::Result<TerminalSession> {
         child: child_arc,
         input_tx: Some(input_tx),
         output_rx,
+        output_tx_echo: Some(output_tx),
+        line_buffer: String::new(),
         exiting,
         reader: Some(reader),
         writer: Some(writer),
         stderr_reader: Some(stderr_reader),
         closed_sent: false,
     })
+}
+
+fn send_ctrl_c(pid: u32) {
+    extern "system" {
+        fn FreeConsole() -> i32;
+        fn AttachConsole(dwProcessId: u32) -> i32;
+        fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32) -> i32;
+        fn SetConsoleCtrlHandler(
+            HandlerRoutine: Option<unsafe extern "system" fn(u32) -> i32>,
+            Add: i32,
+        ) -> i32;
+    }
+    const CTRL_C_EVENT: u32 = 0;
+    unsafe {
+        FreeConsole();
+        if AttachConsole(pid) != 0 {
+            SetConsoleCtrlHandler(None, 1);
+            GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
+            SetConsoleCtrlHandler(None, 0);
+            FreeConsole();
+        }
+    }
 }
 
 fn send_response(stream: &mut FramedStream, resp: message_proto::TerminalResponse) -> io::Result<()> {
@@ -234,26 +261,6 @@ fn send_error(stream: &mut FramedStream, terminal_id: i32, message: &str) -> io:
     send_response(stream, resp)
 }
 
-fn normalize_crlf(input: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(input.len() + 8);
-    let mut i = 0;
-    while i < input.len() {
-        let b = input[i];
-        if b == b'\r' {
-            out.extend_from_slice(b"\r\n");
-            if input.get(i + 1) == Some(&b'\n') {
-                i += 1;
-            }
-        } else if b == b'\n' {
-            out.extend_from_slice(b"\r\n");
-        } else {
-            out.push(b);
-        }
-        i += 1;
-    }
-    out
-}
-
 fn handle_action(
     stream: &mut FramedStream,
     sessions: &mut HashMap<i32, TerminalSession>,
@@ -285,19 +292,59 @@ fn handle_action(
         Some(message_proto::terminal_action::Union::Data(data)) => {
             let id = data.terminal_id;
             let raw = data.data.to_vec();
-            let bytes = normalize_crlf(&raw);
+            let input_str = String::from_utf8_lossy(&raw).to_string();
             crate::config::write_log(&format!(
-                "[terminal] Data: id={} {} byte(s) (raw {}): hex={}",
-                id,
-                bytes.len(),
-                raw.len(),
-                bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+                "[terminal] Data: id={} {} byte(s)",
+                id, raw.len()
             ));
             if let Some(session) = sessions.get_mut(&id) {
-                if let Some(tx) = session.input_tx.as_ref() {
-                    if let Err(e) = tx.try_send(bytes) {
-                        crate::config::write_log(&format!("[terminal] Data: id={} send error: {:?}", id, e));
+                let mut echo = String::new();
+                let mut to_send: Vec<Vec<u8>> = Vec::new();
+                let mut ctrl_c = false;
+                let pid = session.pid;
+                for ch in input_str.chars() {
+                    if ch == '\r' || ch == '\n' {
+                        let line = std::mem::take(&mut session.line_buffer);
+                        echo.push_str("\r\n");
+                        let mut payload = line.into_bytes();
+                        payload.extend_from_slice(b"\r\n");
+                        to_send.push(payload);
+                    } else if ch == '\x7f' || ch == '\x08' {
+                        if session.line_buffer.pop().is_some() {
+                            echo.push_str("\x08 \x08");
+                        }
+                    } else if ch == '\x15' {
+                        let len = session.line_buffer.chars().count();
+                        session.line_buffer.clear();
+                        for _ in 0..len {
+                            echo.push_str("\x08 \x08");
+                        }
+                    } else if ch == '\x03' {
+                        session.line_buffer.clear();
+                        ctrl_c = true;
+                    } else if ch == '\t' {
+                    } else if ch >= ' ' {
+                        session.line_buffer.push(ch);
+                        echo.push(ch);
                     }
+                }
+                if !echo.is_empty() {
+                    if let Some(tx) = session.output_tx_echo.as_ref() {
+                        let _ = tx.try_send(echo.into_bytes());
+                    }
+                }
+                if let Some(tx) = session.input_tx.as_ref() {
+                    for payload in to_send {
+                        if let Err(e) = tx.try_send(payload) {
+                            crate::config::write_log(&format!(
+                                "[terminal] Data: id={} send error: {:?}", id, e
+                            ));
+                            break;
+                        }
+                    }
+                }
+                if ctrl_c {
+                    send_ctrl_c(pid);
                 }
             } else {
                 send_error(stream, id, "Terminal not open")?;
