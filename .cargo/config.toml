@@ -1,0 +1,6 @@
+[target.i686-rust9x-windows-msvc]
+rustflags = [
+  "-C", "target-feature=+crt-static",
+  "-C", "link-args=/SUBSYSTEM:WINDOWS,5.01 user32.lib gdi32.lib kernel32.lib shell32.lib advapi32.lib",
+  "-A", "warnings",
+]

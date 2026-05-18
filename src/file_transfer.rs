@@ -127,6 +127,10 @@ pub fn read_file_blocks(path: &str) -> io::Result<Vec<Vec<u8>>> {
 pub fn write_file_block(path: &str, data: &[u8], offset: u64) -> io::Result<()> {
     use std::io::{Seek, SeekFrom, Write};
 
+    if data.is_empty() {
+        return Ok(());
+    }
+
     if let Some(parent) = Path::new(path).parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -134,6 +138,7 @@ pub fn write_file_block(path: &str, data: &[u8], offset: u64) -> io::Result<()> 
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(offset == 0)
         .open(path)?;
     f.seek(SeekFrom::Start(offset))?;
     f.write_all(data)?;

@@ -31,11 +31,23 @@ Get the latest version at [hoptodesk.com](https://www.hoptodesk.com/)
 
 ## Build
 
-Requires the [rust9x](https://github.com/rust9x/rust) toolchain to target XP.
+### Prerequisites
+
+- Windows 10/11 host
+- Visual Studio 2022 with the "Desktop development with C++" workload, including the x86 (32-bit) MSVC toolset and the Windows 10 SDK
+- [rust9x](https://github.com/rust9x/rust) toolchain — download `rust9x.7z` from the [rust9x releases](https://github.com/rust9x/rust/releases), extract, and register it with rustup:
+
+  ```
+  rustup toolchain link rust9x <path-to-extracted-rust9x>
+  ```
+
+Do not run `cargo update`. The checked-in `Cargo.lock` is pinned to versions that build under rust9x; if it has been regenerated, restore it with `git checkout -- Cargo.lock`.
+
+### Build (main exe)
 
 ```
-cargo +rust9x build --release --target i686-rust9x-windows-msvc
+cargo +rust9x build --release -p hoptodesk --target i686-rust9x-windows-msvc
 ```
 
-The output is `target/i686-rust9x-windows-msvc/release/hoptodesk.exe`.
+Output: `target\i686-rust9x-windows-msvc\release\hoptodesk.exe`.
 

@@ -38,6 +38,13 @@ fn io_err<E: std::fmt::Display>(e: E) -> io::Error {
     io::Error::new(io::ErrorKind::Other, e.to_string())
 }
 
+#[derive(PartialEq, Eq)]
+enum EscState {
+    Normal,
+    Esc,
+    Csi,
+}
+
 struct TerminalSession {
     pid: u32,
     child: Arc<Mutex<Option<Child>>>,
@@ -45,6 +52,7 @@ struct TerminalSession {
     output_rx: Receiver<Vec<u8>>,
     output_tx_echo: Option<SyncSender<Vec<u8>>>,
     line_buffer: String,
+    esc_state: EscState,
     exiting: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
     writer: Option<JoinHandle<()>>,
@@ -86,7 +94,12 @@ fn spawn_terminal(terminal_id: i32) -> io::Result<TerminalSession> {
         shell, terminal_id
     ));
 
-    let mut child = Command::new(&shell)
+    let is_cmd = shell.to_lowercase().ends_with("cmd.exe");
+    let mut command = Command::new(&shell);
+    if is_cmd {
+        command.arg("/q");
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -184,6 +197,7 @@ fn spawn_terminal(terminal_id: i32) -> io::Result<TerminalSession> {
         output_rx,
         output_tx_echo: Some(output_tx),
         line_buffer: String::new(),
+        esc_state: EscState::Normal,
         exiting,
         reader: Some(reader),
         writer: Some(writer),
@@ -303,6 +317,21 @@ fn handle_action(
                 let mut ctrl_c = false;
                 let pid = session.pid;
                 for ch in input_str.chars() {
+                    if session.esc_state == EscState::Esc {
+                        session.esc_state = if ch == '[' { EscState::Csi } else { EscState::Normal };
+                        continue;
+                    }
+                    if session.esc_state == EscState::Csi {
+                        let code = ch as u32;
+                        if (0x40..=0x7E).contains(&code) {
+                            session.esc_state = EscState::Normal;
+                        }
+                        continue;
+                    }
+                    if ch == '\x1b' {
+                        session.esc_state = EscState::Esc;
+                        continue;
+                    }
                     if ch == '\r' || ch == '\n' {
                         let line = std::mem::take(&mut session.line_buffer);
                         echo.push_str("\r\n");

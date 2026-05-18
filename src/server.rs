@@ -1550,6 +1550,30 @@ struct WriteJob {
     done: bool,
 }
 
+fn send_parent_refresh(stream: &mut FramedStream, deleted_path: &str) -> io::Result<()> {
+    let parent = std::path::Path::new(deleted_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let fd = if parent.is_empty() {
+        file_transfer::get_drives()
+    } else {
+        match file_transfer::read_dir_to_proto(&parent, true) {
+            Ok(fd) => fd,
+            Err(e) => {
+                crate::config::write_log(&format!("[server/ft] Parent refresh read error: {}", e));
+                return Ok(());
+            }
+        }
+    };
+    let mut fr = message_proto::FileResponse::new();
+    fr.set_dir(fd);
+    let mut msg = message_proto::Message::new();
+    msg.set_file_response(fr);
+    stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+    Ok(())
+}
+
 fn handle_file_action(
     stream: &mut FramedStream,
     fa: message_proto::FileAction,
@@ -1595,19 +1619,12 @@ fn handle_file_action(
                 && recv_req.files.first().map(|f| f.name.is_empty()).unwrap_or(true);
             if is_single_file {
 
-                let p = std::path::Path::new(&dest_path);
-                let existing_size = if p.exists() && p.is_file() {
-                    p.metadata().map(|m| m.len()).unwrap_or(0)
-                } else {
-                    0
-                };
-
                 let client_file_size = recv_req.files.first().map(|f| f.size).unwrap_or(0);
 
-                crate::config::write_log(&format!("[server/ft] Write job (single): id={} file_num=0 dest='{}' client_size={} existing={}", id, dest_path, client_file_size, existing_size));
+                crate::config::write_log(&format!("[server/ft] Write job (single): id={} file_num=0 dest='{}' client_size={}", id, dest_path, client_file_size));
                 write_jobs.insert(id * 1000, WriteJob {
                     path: dest_path.clone(),
-                    offset: existing_size,
+                    offset: 0,
                     id,
                     file_num: 0,
                     done: false,
@@ -1617,13 +1634,14 @@ fn handle_file_action(
                 digest.id = id;
                 digest.file_num = 0;
                 digest.file_size = client_file_size;
-                digest.transferred_size = existing_size;
+                digest.transferred_size = 0;
+                digest.is_upload = true;
                 let mut fr = message_proto::FileResponse::new();
                 fr.set_digest(digest);
                 let mut msg = message_proto::Message::new();
                 msg.set_file_response(fr);
                 stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
-                crate::config::write_log(&format!("[server/ft] Sent Digest for upload: id={} file_size={} transferred={}", id, client_file_size, existing_size));
+                crate::config::write_log(&format!("[server/ft] Sent Digest for upload: id={} file_size={}", id, client_file_size));
             } else {
 
                 for (i, fe) in recv_req.files.iter().enumerate() {
@@ -1636,16 +1654,10 @@ fn handle_file_action(
                     }
                     let file_path = std::path::Path::new(&dest_path).join(&fe.name)
                         .to_string_lossy().to_string();
-                    let p = std::path::Path::new(&file_path);
-                    let existing_size = if p.exists() && p.is_file() {
-                        p.metadata().map(|m| m.len()).unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    crate::config::write_log(&format!("[server/ft] Write job (multi): id={} file_num={} dest='{}' existing={}", id, i, file_path, existing_size));
+                    crate::config::write_log(&format!("[server/ft] Write job (multi): id={} file_num={} dest='{}'", id, i, file_path));
                     write_jobs.insert(id * 1000 + i as i32, WriteJob {
                         path: file_path,
-                        offset: existing_size,
+                        offset: 0,
                         id,
                         file_num: i as i32,
                         done: false,
@@ -1655,7 +1667,8 @@ fn handle_file_action(
                     digest.id = id;
                     digest.file_num = i as i32;
                     digest.file_size = fe.size;
-                    digest.transferred_size = existing_size;
+                    digest.transferred_size = 0;
+                    digest.is_upload = true;
                     let mut fr = message_proto::FileResponse::new();
                     fr.set_digest(digest);
                     let mut msg = message_proto::Message::new();
@@ -1844,14 +1857,20 @@ fn handle_file_action(
                 std::fs::remove_dir(&rd.path)
             };
             match result {
-                Ok(_) => crate::config::write_log(&format!("[server/ft] RemoveDir OK: '{}'", rd.path)),
+                Ok(_) => {
+                    crate::config::write_log(&format!("[server/ft] RemoveDir OK: '{}'", rd.path));
+                    send_parent_refresh(stream, &rd.path)?;
+                }
                 Err(e) => crate::config::write_log(&format!("[server/ft] RemoveDir error: {}", e)),
             }
         }
         Some(message_proto::file_action::Union::RemoveFile(rf)) => {
             crate::config::write_log(&format!("[server/ft] RemoveFile: path='{}' id={} file_num={}", rf.path, rf.id, rf.file_num));
             match std::fs::remove_file(&rf.path) {
-                Ok(_) => crate::config::write_log(&format!("[server/ft] RemoveFile OK: '{}'", rf.path)),
+                Ok(_) => {
+                    crate::config::write_log(&format!("[server/ft] RemoveFile OK: '{}'", rf.path));
+                    send_parent_refresh(stream, &rf.path)?;
+                }
                 Err(e) => crate::config::write_log(&format!("[server/ft] RemoveFile error: {}", e)),
             }
         }
@@ -1930,9 +1949,28 @@ fn handle_file_response_server(
         }
         Some(message_proto::file_response::Union::Done(done)) => {
             let key = done.id * 1000 + done.file_num;
-            if let Some(job) = write_jobs.get_mut(&key) {
-                job.done = true;
-                crate::config::write_log(&format!("[server/ft] Write complete: id={} file_num={} path='{}' size={}", done.id, done.file_num, job.path, job.offset));
+            let resolved_key = if write_jobs.contains_key(&key) {
+                Some(key)
+            } else {
+                write_jobs.iter()
+                    .find(|(_, j)| j.id == done.id && !j.done)
+                    .map(|(k, _)| *k)
+            };
+            if let Some(k) = resolved_key {
+                if let Some(job) = write_jobs.get_mut(&k) {
+                    job.done = true;
+                    crate::config::write_log(&format!("[server/ft] Write complete: id={} file_num={} path='{}' size={}", done.id, job.file_num, job.path, job.offset));
+                    let mut echo = message_proto::FileTransferDone::new();
+                    echo.id = job.id;
+                    echo.file_num = job.file_num;
+                    let mut fr_echo = message_proto::FileResponse::new();
+                    fr_echo.set_done(echo);
+                    let mut msg_echo = message_proto::Message::new();
+                    msg_echo.set_file_response(fr_echo);
+                    stream.send_msg(&msg_echo.write_to_bytes().map_err(io_err)?)?;
+                }
+            } else {
+                crate::config::write_log(&format!("[server/ft] Done for unknown job: id={} file_num={}", done.id, done.file_num));
             }
         }
         _ => {}

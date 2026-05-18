@@ -200,10 +200,27 @@ pub fn cleanup_cm_files(session_id: &str) {
 }
 
 pub fn spawn_cm_process(session_id: &str) {
-    crate::config::write_log(&format!(
-        "[cm] CM info written for session {}; user-session tray will spawn the dialog",
-        session_id
-    ));
+    use std::sync::atomic::Ordering;
+    if crate::install::RUNNING_AS_SERVICE.load(Ordering::SeqCst) {
+        crate::config::write_log(&format!(
+            "[cm] CM info written for session {}; user-session tray will spawn the dialog",
+            session_id
+        ));
+        return;
+    }
+    use std::process::Stdio;
+    let exe = std::env::current_exe().unwrap_or_default();
+    crate::config::write_log(&format!("[cm] Spawning: {} --cm {}", exe.display(), session_id));
+    match std::process::Command::new(&exe)
+        .args(["--cm", session_id])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(_) => {}
+        Err(e) => crate::config::write_log(&format!("[cm] Spawn failed: {}", e)),
+    }
 }
 
 fn read_peer_info(session_id: &str) -> (String, String, String) {

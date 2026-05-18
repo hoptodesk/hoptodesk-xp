@@ -167,6 +167,9 @@ pub fn run_connect_process(target_id: &str, peer_password: &str, is_file_transfe
 
                 let mut connected = false;
                 for addr in &unique_addrs {
+                    if let Ok(mut s) = cs.lock() {
+                        s.tcp_connected = false;
+                    }
                     crate::config::write_log(&format!("[connect] Trying direct TCP to {}...", crate::config::mask_ip(&addr)));
                     if ft {
                         client::connect_to_peer_ft(addr, &my_id2, &target, &pw2, cs.clone(), stop.clone());
@@ -174,7 +177,7 @@ pub fn run_connect_process(target_id: &str, peer_password: &str, is_file_transfe
                         client::connect_to_peer(addr, &my_id2, &target, &pw2, cs.clone(), stop.clone());
                     }
                     if let Ok(s) = cs.lock() {
-                        if s.status == "connected" || s.status == "closed" || s.status == "error" {
+                        if s.tcp_connected {
                             connected = true;
                             break;
                         }

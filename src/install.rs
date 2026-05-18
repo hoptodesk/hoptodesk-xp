@@ -647,6 +647,8 @@ pub fn uninstall_me() -> Result<(), String> {
 
 static SERVICE_STOP: AtomicBool = AtomicBool::new(false);
 
+pub static RUNNING_AS_SERVICE: AtomicBool = AtomicBool::new(false);
+
 static mut SERVICE_STATUS_HANDLE_RAW: SERVICE_STATUS_HANDLE = std::ptr::null_mut();
 
 unsafe extern "system" fn service_ctrl_handler(
@@ -795,6 +797,7 @@ fn run_service_workload(_stop: Arc<AtomicBool>) {
 }
 
 pub fn run_as_service() {
+    RUNNING_AS_SERVICE.store(true, Ordering::SeqCst);
     let name_w = to_wide(SERVICE_NAME);
     let mut entries: [SERVICE_TABLE_ENTRYW; 2] = [
         SERVICE_TABLE_ENTRYW {

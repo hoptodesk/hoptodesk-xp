@@ -32,6 +32,8 @@ pub struct ClientState {
 
     pub recording: bool,
     pub recorder: Option<crate::recording::Recorder>,
+
+    pub tcp_connected: bool,
 }
 
 pub struct DisplayMeta {
@@ -61,6 +63,7 @@ impl Default for ClientState {
             chat_messages: Arc::new(Mutex::new(VecDeque::new())),
             recording: false,
             recorder: None,
+            tcp_connected: false,
         }
     }
 }
@@ -191,6 +194,7 @@ fn run_client_inner(
 
     if let Ok(mut state) = client_state.lock() {
         state.status = "login".into();
+        state.tcp_connected = true;
     }
 
     let data = stream.recv_msg()?;

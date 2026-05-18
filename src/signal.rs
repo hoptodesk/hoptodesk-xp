@@ -48,6 +48,7 @@ const HEALTHCHECK: &str = r#"{"protocol":"one-to-self","data":"healthcheck"}"#;
 const HEALTHCHECK_TIMEOUT: u64 = 90;
 const SERVER_TIMEOUT: u64 = 30;
 const RENDEZVOUS_TIMEOUT: u64 = 12;
+const CONNECT_TIMEOUT_MS: u64 = 18_000;
 
 pub struct SignalState {
     pub status: String,
@@ -128,6 +129,7 @@ pub fn run_signal_loop(
     signal_state: Arc<Mutex<SignalState>>,
 ) {
     loop {
+        let cycle_start = Instant::now();
 
         if let Ok(mut state) = signal_state.lock() {
             state.status = "connecting".to_string();
@@ -149,16 +151,11 @@ pub fn run_signal_loop(
             }
         }
 
-        let delay = if let Ok(state) = signal_state.lock() {
-            if state.error == "username_taken" {
-                15
-            } else {
-                3
-            }
-        } else {
-            3
-        };
-        std::thread::sleep(Duration::from_secs(delay));
+        let elapsed_ms = cycle_start.elapsed().as_millis() as u64;
+        if elapsed_ms < CONNECT_TIMEOUT_MS {
+            std::thread::sleep(Duration::from_millis(CONNECT_TIMEOUT_MS - elapsed_ms));
+        }
+        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
