@@ -74,6 +74,28 @@ pub fn set_window_icon(hwnd: sciter::types::HWINDOW) {
 static mut TIMER_STATE: Option<Arc<Mutex<ui_handler::AppState>>> = None;
 static mut TIMER_HWND: sciter::types::HWINDOW = std::ptr::null_mut();
 static mut TIMER_TICK: u32 = 0;
+static mut INSTALL_PARENT_PID: u32 = 0;
+
+#[cfg(target_os = "windows")]
+fn terminate_pid(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
+        fn TerminateProcess(handle: *mut std::ffi::c_void, exit_code: u32) -> i32;
+        fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+    }
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    unsafe {
+        let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if !h.is_null() {
+            TerminateProcess(h, 0);
+            CloseHandle(h);
+        }
+    }
+}
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -102,11 +124,15 @@ impl MainHandler {
     }
 
     fn show_run_without_install(&self) -> bool {
-        true
+        false
     }
 
     fn run_without_install(&self) {
 
+    }
+
+    fn open_url(&self, url: String) {
+        open_external_url(&url);
     }
 
     fn is_installed_daemon(&self, _prompt: bool) -> bool {
@@ -122,11 +148,20 @@ impl MainHandler {
             match crate::install::install_me(&args, &install_path) {
                 Ok(()) => {
                     crate::config::write_log("[handler] install completed; exiting UI process");
-
+                    unsafe { terminate_pid(INSTALL_PARENT_PID); }
+                    win_info(
+                        "HopToDesk is now installed and the service is running.\n\nUse the Start Menu or desktop icon to open it.",
+                        "Install complete",
+                    );
                     std::process::exit(0);
                 }
                 Err(e) => {
                     crate::config::write_log(&format!("[handler] install failed: {}", e));
+                    win_info(
+                        &format!("Install failed:\n\n{}\n\nMake sure HopToDesk is running as Administrator.", e),
+                        "Install failed",
+                    );
+                    std::process::exit(1);
                 }
             }
         });
@@ -168,7 +203,7 @@ impl MainHandler {
 }
 
 #[cfg(target_os = "windows")]
-fn win_confirm(text: &str, title: &str) -> bool {
+pub fn win_confirm(text: &str, title: &str) -> bool {
     use std::ffi::OsStr;
     use std::iter::once;
     use std::os::windows::ffi::OsStrExt;
@@ -198,7 +233,7 @@ fn win_confirm(text: &str, title: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn win_info(text: &str, title: &str) {
+pub fn win_info(text: &str, title: &str) {
     use std::ffi::OsStr;
     use std::iter::once;
     use std::os::windows::ffi::OsStrExt;
@@ -233,9 +268,40 @@ impl sciter::EventHandler for MainHandler {
         fn get_option(String);
         fn show_run_without_install();
         fn run_without_install();
+        fn open_url(String);
         fn is_installed_daemon(bool);
         fn install_me(String, String);
         fn goto_install();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn open_external_url(url: &str) {
+    use std::ffi::OsStr;
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut std::ffi::c_void,
+            op: *const u16,
+            file: *const u16,
+            params: *const u16,
+            dir: *const u16,
+            show: i32,
+        ) -> isize;
+    }
+    let op: Vec<u16> = OsStr::new("open").encode_wide().chain(once(0)).collect();
+    let file: Vec<u16> = OsStr::new(url).encode_wide().chain(once(0)).collect();
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            op.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        );
     }
 }
 
@@ -450,6 +516,13 @@ fn main() {
                 run_ticket_window();
                 std::process::exit(0);
             }
+            "--install-ui" => {
+                if let Some(ppid) = args.get(2).and_then(|s| s.parse::<u32>().ok()) {
+                    unsafe { INSTALL_PARENT_PID = ppid; }
+                }
+                run_install_window();
+                std::process::exit(0);
+            }
             "--service" => {
                 install::run_as_service();
                 std::process::exit(0);
@@ -572,6 +645,18 @@ fn run_ticket_window() {
     frame.run_app();
 }
 
+fn run_install_window() {
+    sciter::set_options(sciter::RuntimeOptions::GfxLayer(sciter::GFX_LAYER::CPU)).ok();
+    let mut frame = sciter::Window::new();
+    let html = include_str!("ui/install.html");
+    frame.event_handler(MainHandler);
+    frame.load_html(html.as_bytes(), Some("this://app/install.html"));
+    frame.set_title("HopToDesk");
+    let hwnd = frame.get_hwnd();
+    set_window_icon(hwnd);
+    frame.run_app();
+}
+
 fn build_ui_translations() -> String {
     let keys = [
         "This Device", "Your ID", "Password", "Set", "Unattended Access",
@@ -587,6 +672,10 @@ fn build_ui_translations() -> String {
         "Password Settings", "Cancel", "Save", "Language",
         "Rename", "Add to Favorites", "Remove from Favorites",
         "Forget Password", "Remove", "Rename Peer", "Enter alias",
+        "Always connect via relay",
+        "Your IP", "Switch to ID", "Switch to local IP",
+        "No local IP available - showing ID",
+        "Your local IP address - share this for direct LAN connections",
         "Connecting...", "Ready", "Not connected",
         "Website", "Privacy Statement", "OK", "Version",
         "Password must be at least 6 characters", "Passwords do not match",
@@ -749,6 +838,9 @@ fn run_main_ui() {
             "allow-darktheme": cfg2.get_option("allow-darktheme"),
             "dashboard_user_id": cfg2.get_option("dashboard_user_id"),
             "custom-rendezvous-server": cfg2.get_option("custom-rendezvous-server"),
+            "show-local-ip": cfg2.get_option("show-local-ip"),
+            "local_ip": crate::network::get_local_ip(),
+            "id_formatted": id_formatted,
         }).to_string();
         (pj, oj)
     };
@@ -883,35 +975,15 @@ unsafe extern "system" fn main_timer_callback(
         let val = el.get_text();
         if !val.is_empty() {
             let _ = el.set_text("");
-            crate::config::write_log("[install-ui] Install button clicked (via polling)");
-            std::thread::spawn(|| {
-                let install_path = crate::install::default_install_path();
-                let confirm = format!(
-                    "Install HopToDesk to:\n\n{}\n\nThis will also register HopToDesk as a Windows Service so it can accept connections without anyone being logged in.\n\nAdministrator privileges are required.",
-                    install_path.display()
-                );
-                if !win_confirm(&confirm, "Install HopToDesk") {
-                    crate::config::write_log("[install-ui] User declined install");
-                    return;
-                }
-                match crate::install::install_me("startmenu desktopicon", "") {
-                    Ok(()) => {
-                        crate::config::write_log("[install-ui] Install completed; exiting UI process");
-                        win_info(
-                            "HopToDesk is now installed and the service is running.\n\nThe app will close. Use the Start Menu or desktop icon to open it again.",
-                            "Install complete",
-                        );
-                        std::process::exit(0);
-                    }
-                    Err(e) => {
-                        crate::config::write_log(&format!("[install-ui] Install failed: {}", e));
-                        win_info(
-                            &format!("Install failed:\n\n{}\n\nMake sure HopToDesk is running as Administrator.", e),
-                            "Install failed",
-                        );
-                    }
-                }
-            });
+            crate::config::write_log("[install-ui] Install button clicked, opening install window");
+            let exe = std::env::current_exe().unwrap_or_default();
+            let _ = std::process::Command::new(&exe)
+                .arg("--install-ui")
+                .arg(std::process::id().to_string())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
         }
     }
 
@@ -1087,6 +1159,23 @@ unsafe extern "system" fn main_timer_callback(
                 peer_cfg.set_option("mac_address", mac);
                 peer_cfg.save(peer_id);
                 config::write_log(&format!("[WOL] MAC address set for peer {}: {}", peer_id, mac));
+            }
+        }
+    }
+
+    if let Ok(Some(mut el)) = root.find_first("#set-relay-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            let parts: Vec<&str> = text.splitn(2, '|').collect();
+            if parts.len() == 2 {
+                let peer_id = parts[0];
+                let mut peer_cfg = config::PeerConfig::load(peer_id);
+                peer_cfg.set_option("force-always-relay", parts[1]);
+                peer_cfg.save(peer_id);
+                if let Ok(mut s) = state.lock() {
+                    s.sessions_dirty = true;
+                }
             }
         }
     }
@@ -1314,7 +1403,7 @@ unsafe extern "system" fn main_timer_callback(
                         };
 
                         items_html.push_str(&format!(
-                            "<div class=\"session-item\" data-id=\"{}\">\
+                            "<div class=\"session-item\" data-id=\"{}\" data-relay=\"{}\">\
                                 <div class=\"session-platform\">{}</div>\
                                 <div class=\"session-info\">\
                                     <div class=\"session-name\">{}</div>\
@@ -1323,7 +1412,7 @@ unsafe extern "system" fn main_timer_callback(
                                 <div class=\"{}\">{}</div>\
                                 <div class=\"session-menu\">...</div>\
                             </div>",
-                            p.id, plat_label, display_name, sub, fav_class, fav_char
+                            p.id, peer_cfg.get_option("force-always-relay"), plat_label, display_name, sub, fav_class, fav_char
                         ));
                     }
                 }

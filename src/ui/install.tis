@@ -24,7 +24,7 @@ class Install: Reactor.Component {
             <div #privacypolicy .link style="margin-top: 2em;">{translate('Privacy Policy')}</div>
             <div style="height: 1px; background: gray; margin-top: 1em" />
             <div style="text-align: right;">
-                <progress style={"color:" + color} style="display: none" />
+                <progress #installprogress style="display: none" />
                 <button .button id="cancel" .outline style="margin-right: 2em;" title={translate('Cancel')}>{translate('Cancel')}</button>
                 <button .button id="submit" title={translate('Accept and Install')}>{translate('Accept and Install')}</button>
                 {handler.show_run_without_install() && <button .button #run-without-install .outline style="margin-left: 2em;" title={translate('Run without install')}>
@@ -54,7 +54,7 @@ class Install: Reactor.Component {
     }
 
     event click $(#privacypolicy) {
-        view.open_url("https://www.hoptodesk.com/privacy");
+        handler.open_url("https://www.hoptodesk.com/privacy");
     }
 
     event click $(#submit) {

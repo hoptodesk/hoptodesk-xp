@@ -576,6 +576,14 @@ pub fn run_session_public(
     let is_terminal = lr.union.as_ref().map_or(false, |u| {
         matches!(u, message_proto::login_request::Union::Terminal(_))
     });
+    let port_forward_target = lr.union.as_ref().and_then(|u| match u {
+        message_proto::login_request::Union::PortForward(pf) => {
+            let host = if pf.host.is_empty() { "127.0.0.1".to_string() } else { pf.host.clone() };
+            let port = if pf.port == 0 { 3389u16 } else { pf.port as u16 };
+            Some((host, port))
+        }
+        _ => None,
+    });
     crate::config::write_log(&format!("[server] Session type: file_transfer={}, port_forward={}, terminal={}", is_file_transfer, is_port_forward, is_terminal));
 
     let cfg2_perms = crate::config::Config2::load();
@@ -618,6 +626,7 @@ pub fn run_session_public(
     peer_info.hostname = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "XP-PC".into());
     peer_info.platform = "Windows".to_string();
     peer_info.version = env!("CARGO_PKG_VERSION").to_string();
+    peer_info.sas_enabled = crate::install::is_installed();
 
     let displays = capture::enumerate_displays();
 
@@ -665,15 +674,17 @@ pub fn run_session_public(
             (message_proto::permission_info::Permission::File, cfg2.get_option("enable-file-transfer") != "N"),
             (message_proto::permission_info::Permission::Restart, cfg2.get_option("enable-remote-restart") != "N"),
         ];
-        for (perm, enabled) in perms {
-            let mut perm_info = message_proto::PermissionInfo::new();
-            perm_info.permission = protobuf::EnumOrUnknown::new(perm);
-            perm_info.enabled = enabled;
-            let mut misc = message_proto::Misc::new();
-            misc.set_permission_info(perm_info);
-            let mut pmsg = message_proto::Message::new();
-            pmsg.set_misc(misc);
-            let _ = stream.send_msg(&pmsg.write_to_bytes().unwrap_or_default());
+        if !is_port_forward {
+            for (perm, enabled) in perms {
+                let mut perm_info = message_proto::PermissionInfo::new();
+                perm_info.permission = protobuf::EnumOrUnknown::new(perm);
+                perm_info.enabled = enabled;
+                let mut misc = message_proto::Misc::new();
+                misc.set_permission_info(perm_info);
+                let mut pmsg = message_proto::Message::new();
+                pmsg.set_misc(misc);
+                let _ = stream.send_msg(&pmsg.write_to_bytes().unwrap_or_default());
+            }
         }
     }
 
@@ -708,6 +719,17 @@ pub fn run_session_public(
         crate::config::write_log(&format!("[server] Terminal session"));
 
         let result = crate::terminal_service::run_terminal_loop(stream, stop);
+        if let Ok(mut s) = CURRENT_CM_SESSION.lock() { *s = None; }
+        cm::signal_cm_ended(&cm_session_id);
+        cm::cleanup_cm_files(&cm_session_id);
+        rotate_password_if_needed();
+        return result;
+    }
+
+    if is_port_forward {
+        let (target_host, target_port) = port_forward_target.clone().unwrap_or_else(|| ("127.0.0.1".to_string(), 3389));
+        crate::config::write_log(&format!("[server] Port forward session -> {}:{}", target_host, target_port));
+        let result = run_port_forward_loop(stream, &target_host, target_port, stop);
         if let Ok(mut s) = CURRENT_CM_SESSION.lock() { *s = None; }
         cm::signal_cm_ended(&cm_session_id);
         cm::cleanup_cm_files(&cm_session_id);
@@ -769,6 +791,13 @@ fn run_video_input_loop(
     let target_fps = 10;
     let frame_interval = Duration::from_millis(1000 / target_fps as u64);
 
+    let display_x = d.x;
+    let display_y = d.y;
+    let mut last_cursor_handle: usize = 0;
+    let mut last_cursor_pos: (i32, i32) = (i32::MIN, i32::MIN);
+    let mut last_cursor_check = Instant::now();
+    let mut show_remote_cursor = false;
+
     stream.set_read_timeout(Some(Duration::from_millis(1))).ok();
 
     let mut last_frame = Instant::now();
@@ -778,6 +807,8 @@ fn run_video_input_loop(
     let mut force_keyframe = true;
 
     let mut last_cm_check = Instant::now();
+    let mut last_keepalive = Instant::now();
+    let mut pending_link: Option<(String, Instant)> = None;
 
     let cfg2 = crate::config::Config2::load();
     let mut keyboard_enabled = cfg2.get_option("enable-keyboard") != "N";
@@ -841,6 +872,58 @@ fn run_video_input_loop(
                             }
 
                             break;
+                        }
+                    }
+
+                    if let Some(message_proto::message::Union::Misc(ref misc)) = msg.union {
+                        if let Some(message_proto::misc::Union::LinkDashboardRequest(ref req)) = misc.union {
+                            let code = req.invite_code.trim().to_string();
+                            crate::config::write_log("[server] LinkDashboardRequest received");
+                            let reason = if code.is_empty() {
+                                Some("invalid_invite")
+                            } else if pending_link.is_some() {
+                                Some("busy")
+                            } else {
+                                match crate::dashboard::validate_invite(&code) {
+                                    Ok((_, new_user_id, _, account_name)) => {
+                                        let existing = crate::dashboard::get_dashboard_user_id();
+                                        if !existing.is_empty() && existing == new_user_id {
+                                            Some("already_linked")
+                                        } else {
+                                            let mut asked = false;
+                                            if let Ok(s) = CURRENT_CM_SESSION.lock() {
+                                                if let Some(ref sid) = *s {
+                                                    let _ = std::fs::remove_file(cm::cm_link_response_path(sid));
+                                                    asked = std::fs::write(cm::cm_link_request_path(sid), &account_name).is_ok();
+                                                }
+                                            }
+                                            if asked {
+                                                pending_link = Some((code.clone(), Instant::now()));
+                                                None
+                                            } else {
+                                                Some("link_failed")
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        crate::config::write_log(&format!("[server] LinkDashboard validate_invite failed: {}", e));
+                                        Some("invalid_invite")
+                                    }
+                                }
+                            };
+                            if let Some(r) = reason {
+                                let _ = stream.send_msg(&link_dashboard_response_msg(false, r).write_to_bytes().unwrap_or_default());
+                            }
+                        }
+                    }
+
+                    if let Some(message_proto::message::Union::Misc(ref misc)) = msg.union {
+                        if let Some(message_proto::misc::Union::Option(ref opt)) = misc.union {
+                            match opt.show_remote_cursor.enum_value() {
+                                Ok(message_proto::option_message::BoolOption::Yes) => show_remote_cursor = true,
+                                Ok(message_proto::option_message::BoolOption::No) => show_remote_cursor = false,
+                                _ => {}
+                            }
                         }
                     }
 
@@ -922,6 +1005,57 @@ fn run_video_input_loop(
             }
         }
 
+        if pending_link.is_some() {
+            let response = {
+                let mut found = None;
+                if let Ok(s) = CURRENT_CM_SESSION.lock() {
+                    if let Some(ref sid) = *s {
+                        let path = cm::cm_link_response_path(sid);
+                        if let Ok(text) = std::fs::read_to_string(&path) {
+                            let _ = std::fs::remove_file(&path);
+                            found = Some(text.trim() == "Y");
+                        }
+                    }
+                }
+                found
+            };
+            if let Some(accepted) = response {
+                let (code, _) = pending_link.take().unwrap();
+                let reply = if !accepted {
+                    link_dashboard_response_msg(false, "declined")
+                } else {
+                    let mut cfg2 = crate::config::Config2::load();
+                    cfg2.set_option("invite_code", &code);
+                    cfg2.save();
+                    match crate::dashboard::link_device() {
+                        Ok(()) => {
+                            let mut cfg2 = crate::config::Config2::load();
+                            cfg2.set_option("last_enrolled_invite_code", &code);
+                            cfg2.save();
+                            link_dashboard_response_msg(true, "")
+                        }
+                        Err(e) => {
+                            crate::config::write_log(&format!("[server] LinkDashboard link_device failed: {}", e));
+                            let mut cfg2 = crate::config::Config2::load();
+                            cfg2.set_option("invite_code", "");
+                            cfg2.save();
+                            link_dashboard_response_msg(false, "link_failed")
+                        }
+                    }
+                };
+                let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
+            } else if pending_link.as_ref().map_or(false, |(_, started)| started.elapsed() >= Duration::from_secs(120)) {
+                pending_link = None;
+                if let Ok(s) = CURRENT_CM_SESSION.lock() {
+                    if let Some(ref sid) = *s {
+                        let _ = std::fs::remove_file(cm::cm_link_request_path(sid));
+                        let _ = std::fs::remove_file(cm::cm_link_response_path(sid));
+                    }
+                }
+                let _ = stream.send_msg(&link_dashboard_response_msg(false, "timeout").write_to_bytes().unwrap_or_default());
+            }
+        }
+
         if let Ok(s) = CURRENT_CM_SESSION.lock() {
             if let Some(ref sid) = *s {
                 let path = cm::cm_chat_send_path(sid);
@@ -941,6 +1075,60 @@ fn run_video_input_loop(
         }
 
         let now = Instant::now();
+        if now.duration_since(last_keepalive) >= Duration::from_secs(3) {
+            last_keepalive = now;
+            let mut td = message_proto::TestDelay::new();
+            td.from_client = false;
+            let mut msg = message_proto::Message::new();
+            msg.set_test_delay(td);
+            if stream.send_msg(&msg.write_to_bytes().map_err(io_err)?).is_err() {
+                break;
+            }
+        }
+
+        if show_remote_cursor && now.duration_since(last_cursor_check) >= Duration::from_millis(100) {
+            last_cursor_check = now;
+            if let Some(cs) = platform::get_cursor() {
+                if cs.visible {
+                    if cs.cursor_handle != 0 && cs.cursor_handle != last_cursor_handle {
+                        if let Some(data) = platform::get_cursor_data(cs.cursor_handle) {
+                            if data.width <= 0 || data.height <= 0
+                                || data.colors.len() != (data.width * data.height * 4) as usize {
+                                continue;
+                            }
+                            let mut colors = data.colors;
+                            let mut i = 0;
+                            while i + 2 < colors.len() {
+                                colors.swap(i, i + 2);
+                                i += 4;
+                            }
+                            let mut cd = message_proto::CursorData::new();
+                            cd.id = data.id;
+                            cd.hotx = data.hotx;
+                            cd.hoty = data.hoty;
+                            cd.width = data.width;
+                            cd.height = data.height;
+                            cd.colors = file_transfer::zstd_wrap_raw(&colors).into();
+                            let mut msg = message_proto::Message::new();
+                            msg.set_cursor_data(cd);
+                            let _ = stream.send_msg(&msg.write_to_bytes().map_err(io_err)?);
+                            last_cursor_handle = cs.cursor_handle;
+                        }
+                    }
+                    let pos = (cs.x - display_x, cs.y - display_y);
+                    if pos != last_cursor_pos {
+                        last_cursor_pos = pos;
+                        let mut cp = message_proto::CursorPosition::new();
+                        cp.x = pos.0;
+                        cp.y = pos.1;
+                        let mut msg = message_proto::Message::new();
+                        msg.set_cursor_position(cp);
+                        let _ = stream.send_msg(&msg.write_to_bytes().map_err(io_err)?);
+                    }
+                }
+            }
+        }
+
         if now.duration_since(last_frame) >= frame_interval {
             if let Err(e) = capturer.frame(&mut frame_buf) {
                 crate::config::write_log(&format!("[server] Capture error: {}", e));
@@ -1017,15 +1205,8 @@ fn handle_peer_message(msg: &message_proto::Message, screen_w: i32, screen_h: i3
         Some(message_proto::message::Union::Misc(misc)) => {
             return handle_misc(misc);
         }
-        Some(message_proto::message::Union::TestDelay(td)) => {
-
-            let mut resp = message_proto::TestDelay::new();
-            resp.time = td.time;
-            resp.last_delay = td.last_delay;
-            resp.from_client = false;
-            let mut reply = message_proto::Message::new();
-            reply.set_test_delay(resp);
-            return Some(reply);
+        Some(message_proto::message::Union::TestDelay(_td)) => {
+            return None;
         }
         _ => {}
     }
@@ -1197,6 +1378,17 @@ fn map_keyboard_mode(ke: &message_proto::KeyEvent) {
         }
         _ => {}
     }
+}
+
+fn link_dashboard_response_msg(accepted: bool, reason: &str) -> message_proto::Message {
+    let mut resp = message_proto::LinkDashboardResponse::new();
+    resp.accepted = accepted;
+    resp.reason = reason.to_string();
+    let mut misc = message_proto::Misc::new();
+    misc.union = Some(message_proto::misc::Union::LinkDashboardResponse(resp));
+    let mut msg = message_proto::Message::new();
+    msg.set_misc(misc);
+    msg
 }
 
 fn handle_misc(misc: &message_proto::Misc) -> Option<message_proto::Message> {
@@ -1432,11 +1624,24 @@ fn run_file_transfer_loop(
     let mut timeout_count: u64 = 0;
 
     let mut delayed_dir_sent = false;
+    let mut last_keepalive = Instant::now();
+    let mut show_hidden = false;
 
     loop {
         if stop.load(Ordering::Relaxed) {
             crate::config::write_log("[server/ft] Stop flag set, exiting loop");
             break;
+        }
+
+        if last_keepalive.elapsed() >= Duration::from_secs(3) {
+            last_keepalive = Instant::now();
+            let mut td = message_proto::TestDelay::new();
+            td.from_client = false;
+            let mut msg = message_proto::Message::new();
+            msg.set_test_delay(td);
+            if stream.send_msg(&msg.write_to_bytes().map_err(io_err)?).is_err() {
+                break;
+            }
         }
 
         let data = match stream.recv_msg() {
@@ -1490,19 +1695,12 @@ fn run_file_transfer_loop(
 
             match msg.union {
                 Some(message_proto::message::Union::FileAction(fa)) => {
-                    handle_file_action(stream, fa, &mut send_jobs, &mut write_jobs)?;
+                    handle_file_action(stream, fa, &mut send_jobs, &mut write_jobs, &mut show_hidden)?;
                 }
                 Some(message_proto::message::Union::FileResponse(fr)) => {
                     handle_file_response_server(stream, fr, &mut write_jobs)?;
                 }
-                Some(message_proto::message::Union::TestDelay(td)) => {
-                    let mut resp = message_proto::TestDelay::new();
-                    resp.time = td.time;
-                    resp.last_delay = td.last_delay;
-                    resp.from_client = false;
-                    let mut reply = message_proto::Message::new();
-                    reply.set_test_delay(resp);
-                    stream.send_msg(&reply.write_to_bytes().map_err(io_err)?)?;
+                Some(message_proto::message::Union::TestDelay(_td)) => {
                 }
                 Some(message_proto::message::Union::Misc(misc)) => {
                     match &misc.union {
@@ -1550,7 +1748,7 @@ struct WriteJob {
     done: bool,
 }
 
-fn send_parent_refresh(stream: &mut FramedStream, deleted_path: &str) -> io::Result<()> {
+fn send_parent_refresh(stream: &mut FramedStream, deleted_path: &str, include_hidden: bool) -> io::Result<()> {
     let parent = std::path::Path::new(deleted_path)
         .parent()
         .map(|p| p.to_string_lossy().to_string())
@@ -1558,7 +1756,7 @@ fn send_parent_refresh(stream: &mut FramedStream, deleted_path: &str) -> io::Res
     let fd = if parent.is_empty() {
         file_transfer::get_drives()
     } else {
-        match file_transfer::read_dir_to_proto(&parent, true) {
+        match file_transfer::read_dir_to_proto(&parent, include_hidden) {
             Ok(fd) => fd,
             Err(e) => {
                 crate::config::write_log(&format!("[server/ft] Parent refresh read error: {}", e));
@@ -1574,15 +1772,52 @@ fn send_parent_refresh(stream: &mut FramedStream, deleted_path: &str) -> io::Res
     Ok(())
 }
 
+fn send_upload_overwrite_decision(
+    stream: &mut FramedStream,
+    id: i32,
+    file_num: i32,
+    dest_path: &str,
+    client_file_size: u64,
+) -> io::Result<()> {
+    if std::path::Path::new(dest_path).is_file() {
+        let mut digest = message_proto::FileTransferDigest::new();
+        digest.id = id;
+        digest.file_num = file_num;
+        digest.file_size = client_file_size;
+        digest.transferred_size = 0;
+        digest.is_upload = true;
+        let mut fr = message_proto::FileResponse::new();
+        fr.set_digest(digest);
+        let mut msg = message_proto::Message::new();
+        msg.set_file_response(fr);
+        stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+        crate::config::write_log(&format!("[server/ft] Dest exists, sent overwrite Digest: id={} file_num={}", id, file_num));
+    } else {
+        let mut sc = message_proto::FileTransferSendConfirmRequest::new();
+        sc.id = id;
+        sc.file_num = file_num;
+        sc.union = Some(message_proto::file_transfer_send_confirm_request::Union::OffsetBlk(0));
+        let mut fa = message_proto::FileAction::new();
+        fa.union = Some(message_proto::file_action::Union::SendConfirm(sc));
+        let mut msg = message_proto::Message::new();
+        msg.set_file_action(fa);
+        stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+        crate::config::write_log(&format!("[server/ft] Dest absent, auto-confirmed upload: id={} file_num={}", id, file_num));
+    }
+    Ok(())
+}
+
 fn handle_file_action(
     stream: &mut FramedStream,
     fa: message_proto::FileAction,
     send_jobs: &mut HashMap<i32, SendJob>,
     write_jobs: &mut HashMap<i32, WriteJob>,
+    show_hidden: &mut bool,
 ) -> io::Result<()> {
     match fa.union {
         Some(message_proto::file_action::Union::ReadDir(rd)) => {
             crate::config::write_log(&format!("[server/ft] ReadDir request: path='{}', hidden={}", rd.path, rd.include_hidden));
+            *show_hidden = rd.include_hidden;
             let path = if rd.path.is_empty() { "" } else { &rd.path };
             let fd = if path.is_empty() {
                 file_transfer::get_drives()
@@ -1630,18 +1865,7 @@ fn handle_file_action(
                     done: false,
                 });
 
-                let mut digest = message_proto::FileTransferDigest::new();
-                digest.id = id;
-                digest.file_num = 0;
-                digest.file_size = client_file_size;
-                digest.transferred_size = 0;
-                digest.is_upload = true;
-                let mut fr = message_proto::FileResponse::new();
-                fr.set_digest(digest);
-                let mut msg = message_proto::Message::new();
-                msg.set_file_response(fr);
-                stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
-                crate::config::write_log(&format!("[server/ft] Sent Digest for upload: id={} file_size={}", id, client_file_size));
+                send_upload_overwrite_decision(stream, id, 0, &dest_path, client_file_size)?;
             } else {
 
                 for (i, fe) in recv_req.files.iter().enumerate() {
@@ -1656,26 +1880,16 @@ fn handle_file_action(
                         .to_string_lossy().to_string();
                     crate::config::write_log(&format!("[server/ft] Write job (multi): id={} file_num={} dest='{}'", id, i, file_path));
                     write_jobs.insert(id * 1000 + i as i32, WriteJob {
-                        path: file_path,
+                        path: file_path.clone(),
                         offset: 0,
                         id,
                         file_num: i as i32,
                         done: false,
                     });
 
-                    let mut digest = message_proto::FileTransferDigest::new();
-                    digest.id = id;
-                    digest.file_num = i as i32;
-                    digest.file_size = fe.size;
-                    digest.transferred_size = 0;
-                    digest.is_upload = true;
-                    let mut fr = message_proto::FileResponse::new();
-                    fr.set_digest(digest);
-                    let mut msg = message_proto::Message::new();
-                    msg.set_file_response(fr);
-                    stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+                    send_upload_overwrite_decision(stream, id, i as i32, &file_path, fe.size)?;
                 }
-                crate::config::write_log(&format!("[server/ft] Sent {} Digests for multi-file upload", recv_req.files.len()));
+                crate::config::write_log(&format!("[server/ft] Processed {} files for multi-file upload", recv_req.files.len()));
             }
         }
         Some(message_proto::file_action::Union::Send(send_req)) => {
@@ -1859,7 +2073,7 @@ fn handle_file_action(
             match result {
                 Ok(_) => {
                     crate::config::write_log(&format!("[server/ft] RemoveDir OK: '{}'", rd.path));
-                    send_parent_refresh(stream, &rd.path)?;
+                    send_parent_refresh(stream, &rd.path, *show_hidden)?;
                 }
                 Err(e) => crate::config::write_log(&format!("[server/ft] RemoveDir error: {}", e)),
             }
@@ -1869,7 +2083,7 @@ fn handle_file_action(
             match std::fs::remove_file(&rf.path) {
                 Ok(_) => {
                     crate::config::write_log(&format!("[server/ft] RemoveFile OK: '{}'", rf.path));
-                    send_parent_refresh(stream, &rf.path)?;
+                    send_parent_refresh(stream, &rf.path, *show_hidden)?;
                 }
                 Err(e) => crate::config::write_log(&format!("[server/ft] RemoveFile error: {}", e)),
             }
@@ -1920,9 +2134,14 @@ fn handle_file_response_server(
             if let Some(job) = write_jobs.get_mut(&key) {
                 if job.done { return Ok(()); }
 
-                match file_transfer::write_file_block(&job.path, &block.data, job.offset) {
+                let decoded = if block.compressed {
+                    file_transfer::zstd_decompress(&block.data)
+                } else {
+                    block.data.to_vec()
+                };
+                match file_transfer::write_file_block(&job.path, &decoded, job.offset) {
                     Ok(_) => {
-                        job.offset += block.data.len() as u64;
+                        job.offset += decoded.len() as u64;
                         if block.blk_id % 100 == 0 {
                             crate::config::write_log(&format!("[server/ft] Writing block: id={} file_num={} blk={} offset={}",
                                 block.id, block.file_num, block.blk_id, job.offset));

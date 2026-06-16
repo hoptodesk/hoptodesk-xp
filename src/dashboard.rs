@@ -46,7 +46,7 @@ pub fn get_dashboard_user_id() -> String {
     cfg.get_option("dashboard_user_id")
 }
 
-pub fn validate_invite(invite_code: &str) -> Result<(String, String, String), String> {
+pub fn validate_invite(invite_code: &str) -> Result<(String, String, String, String), String> {
     let url = format!(
         "{}?action=validateInvite&invite_code={}",
         DASHBOARD_API_URL, invite_code
@@ -70,10 +70,50 @@ pub fn validate_invite(invite_code: &str) -> Result<(String, String, String), St
         .as_str()
         .unwrap_or("standard")
         .to_string();
+    let account_name = invite["account_name"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
     if dashboard_user_id.is_empty() || dashboard_user_id.starts_with("DASH-") {
         return Err(format!("Invalid dashboard_user_id: {}", dashboard_user_id));
     }
-    Ok((enrollment_token, dashboard_user_id, invite_type))
+    Ok((enrollment_token, dashboard_user_id, invite_type, account_name))
+}
+
+pub fn get_share_invite() -> Result<String, String> {
+    let cached = Config2::load().get_option("share_invite_code");
+    if !cached.is_empty() {
+        return Ok(cached);
+    }
+    let dashboard_user_id = get_dashboard_user_id();
+    if dashboard_user_id.is_empty() {
+        return Err("Not linked to a dashboard".to_string());
+    }
+    let device_id = config::Config::load().id;
+    if device_id.is_empty() {
+        return Err("Device ID not available".to_string());
+    }
+    let url = format!("{}?action=getShareInvite", DASHBOARD_API_URL);
+    let body = wininet::http_post_form(
+        &url,
+        &[
+            ("device_id", &device_id),
+            ("dashboard_user_id", &dashboard_user_id),
+        ],
+    )?;
+    let resp: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
+    if resp["success"].as_bool() != Some(true) {
+        return Err(format!("getShareInvite failed: {}", resp));
+    }
+    let code = resp["invite_code"].as_str().unwrap_or("").to_string();
+    if code.is_empty() {
+        return Err("getShareInvite returned empty code".to_string());
+    }
+    let mut cfg2 = Config2::load();
+    cfg2.set_option("share_invite_code", &code);
+    cfg2.save();
+    Ok(code)
 }
 
 pub fn register_device(
@@ -177,7 +217,7 @@ fn link_device_inner() -> Result<(), String> {
         &invite_code[..invite_code.len().min(8)]
     ));
 
-    let (enrollment_token, dashboard_user_id, _invite_type) = validate_invite(&invite_code)?;
+    let (enrollment_token, dashboard_user_id, _invite_type, _account_name) = validate_invite(&invite_code)?;
 
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();

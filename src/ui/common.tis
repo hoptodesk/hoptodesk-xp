@@ -360,15 +360,16 @@ handler.cancel_msgbox = function(tag) {
     }
 }
 
-var reconnectTimeout = 1000;
+var reconnectTimeout = 3000;
 handler.msgbox_retry = function(type, title, text, link, hasRetry) {
     handler.msgbox(type, title, text, link, hasRetry);
     if (hasRetry) {
         self.timer(0, retryConnect);
         self.timer(reconnectTimeout, retryConnect);
         reconnectTimeout *= 2;
+        if (reconnectTimeout > 30000) reconnectTimeout = 30000;
     } else {
-        reconnectTimeout = 1000;
+        reconnectTimeout = 3000;
     }
 }
 

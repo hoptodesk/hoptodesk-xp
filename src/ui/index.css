@@ -242,15 +242,19 @@ svg#settings-gear:hover, svg#settings-gear:focus {
 }
 
 .pw-label {
-    font-size: 0.75em;
+    font-size: 0.85em;
     color: #64748B;
     font-weight: 600;
 }
 
 #unattendedlabel {
-    font-size: 0.68em;
+    font-size: 0.8em;
     color: #64748B;
     margin-right: 6px;
+}
+
+#id-mode-toggle {
+    cursor: pointer;
 }
 
 .passwordbox {

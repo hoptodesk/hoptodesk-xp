@@ -432,6 +432,7 @@
         <button class="tb-btn tb-blue" id="tb-transfer">Transfer File</button>
         <button class="tb-btn tb-blue" id="tb-chat">Chat</button>
         <button class="tb-btn tb-blue" id="tb-switch-sides">Switch Sides</button>
+        <button class="tb-btn tb-blue" id="tb-add-dashboard">Add to Dashboard</button>
         <button class="tb-btn tb-blue" id="tb-screenshot">Screenshot</button>
         <div class="tb-sep"></div>
         <button class="tb-btn tb-red" id="tb-disconnect">Disconnect</button>
@@ -537,11 +538,13 @@
     <div id="transfer-flag" class="hidden-flag"></div>
     <div id="screenshot-flag" class="hidden-flag"></div>
     <div id="switch-sides-flag" class="hidden-flag"></div>
+    <div id="add-dashboard-flag" class="hidden-flag"></div>
 
     <script type="text/tiscript">
 
         $(#key-event).text = "debug_script_start";
         var IS_FT = __IS_FILE_TRANSFER__;
+        var DASHBOARD_LINKED = __DASHBOARD_LINKED__;
         var HOME_DIR = "__HOME_DIR__";
 
         var canvas = $(#canvas);
@@ -1222,6 +1225,13 @@
 
         $(#tb-switch-sides).onClick = function() {
             $(#switch-sides-flag).text = "1";
+        };
+
+        if (!DASHBOARD_LINKED) {
+            $(#tb-add-dashboard).style#display = "none";
+        }
+        $(#tb-add-dashboard).onClick = function() {
+            $(#add-dashboard-flag).text = "1";
         };
 
         $(#tb-disconnect).onClick = function() {

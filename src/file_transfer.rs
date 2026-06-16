@@ -124,6 +124,44 @@ pub fn read_file_blocks(path: &str) -> io::Result<Vec<Vec<u8>>> {
     Ok(blocks)
 }
 
+pub fn zstd_wrap_raw(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + 16);
+    out.extend_from_slice(&[0x28, 0xB5, 0x2F, 0xFD]);
+    out.push(0xA0);
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    if data.is_empty() {
+        let header: u32 = 1;
+        out.extend_from_slice(&header.to_le_bytes()[..3]);
+        return out;
+    }
+    let max_block = 128 * 1024;
+    let mut offset = 0;
+    while offset < data.len() {
+        let chunk_len = std::cmp::min(max_block, data.len() - offset);
+        let last: u32 = if offset + chunk_len >= data.len() { 1 } else { 0 };
+        let header: u32 = ((chunk_len as u32) << 3) | last;
+        out.extend_from_slice(&header.to_le_bytes()[..3]);
+        out.extend_from_slice(&data[offset..offset + chunk_len]);
+        offset += chunk_len;
+    }
+    out
+}
+
+pub fn zstd_decompress(data: &[u8]) -> Vec<u8> {
+    use std::io::Read;
+    match ruzstd::StreamingDecoder::new(data) {
+        Ok(mut decoder) => {
+            let mut out = Vec::new();
+            if decoder.read_to_end(&mut out).is_ok() {
+                out
+            } else {
+                Vec::new()
+            }
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
 pub fn write_file_block(path: &str, data: &[u8], offset: u64) -> io::Result<()> {
     use std::io::{Seek, SeekFrom, Write};
 
@@ -211,8 +249,8 @@ pub fn file_directory_to_value(fd: &message_proto::FileDirectory) -> sciter::Val
         };
         e.set_item(sciter::Value::from("type"), sciter::Value::from(type_num));
         e.set_item(sciter::Value::from("name"), sciter::Value::from(fe.name.as_str()));
-        e.set_item(sciter::Value::from("size"), sciter::Value::from(fe.size as i32));
-        e.set_item(sciter::Value::from("time"), sciter::Value::from(fe.modified_time as i32));
+        e.set_item(sciter::Value::from("size"), sciter::Value::from(fe.size as f64));
+        e.set_item(sciter::Value::from("time"), sciter::Value::from(fe.modified_time as f64));
         e.set_item(sciter::Value::from("is_hidden"), sciter::Value::from(fe.is_hidden));
         entries.push(e);
     }

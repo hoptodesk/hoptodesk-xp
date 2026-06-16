@@ -149,8 +149,13 @@ pub struct DisplayInfo {
 }
 
 pub fn enumerate_displays() -> Vec<DisplayInfo> {
-    use winapi::um::winuser::{EnumDisplayDevicesW, EnumDisplaySettingsW, ENUM_CURRENT_SETTINGS};
+    use winapi::um::winuser::{EnumDisplayDevicesW, EnumDisplaySettingsW, ENUM_CURRENT_SETTINGS, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
     use winapi::um::wingdi::DISPLAY_DEVICEW;
+
+    const DISPLAY_DEVICE_ACTIVE: u32 = 0x00000001;
+    const DISPLAY_DEVICE_PRIMARY_DEVICE: u32 = 0x00000004;
+    let primary_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let primary_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
 
     let mut displays = Vec::new();
     let mut device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
@@ -163,7 +168,6 @@ pub fn enumerate_displays() -> Vec<DisplayInfo> {
             break;
         }
 
-        const DISPLAY_DEVICE_ACTIVE: u32 = 0x00000001;
         if device.StateFlags & DISPLAY_DEVICE_ACTIVE != 0 {
             let mut devmode: winapi::um::wingdi::DEVMODEW = unsafe { std::mem::zeroed() };
             devmode.dmSize = size_of::<winapi::um::wingdi::DEVMODEW>() as u16;
@@ -177,10 +181,22 @@ pub fn enumerate_displays() -> Vec<DisplayInfo> {
                 let mut name: Vec<u16> = device.DeviceName[..name_len].to_vec();
                 name.push(0);
 
+                let is_primary = device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE != 0;
+                let mut width = devmode.dmPelsWidth as i32;
+                let mut height = devmode.dmPelsHeight as i32;
+                if is_primary && primary_w > 0 && primary_h > 0 {
+                    crate::config::write_log(&format!(
+                        "[capture] primary display dmPels={}x{} GetSystemMetrics={}x{}",
+                        width, height, primary_w, primary_h
+                    ));
+                    width = primary_w;
+                    height = primary_h;
+                }
+
                 displays.push(DisplayInfo {
                     name,
-                    width: devmode.dmPelsWidth as i32,
-                    height: devmode.dmPelsHeight as i32,
+                    width,
+                    height,
                     x: unsafe { devmode.u1.s2().dmPosition.x },
                     y: unsafe { devmode.u1.s2().dmPosition.y },
                 });
@@ -188,6 +204,22 @@ pub fn enumerate_displays() -> Vec<DisplayInfo> {
         }
 
         i += 1;
+    }
+
+    if displays.is_empty() && primary_w > 0 && primary_h > 0 {
+        crate::config::write_log(&format!(
+            "[capture] no displays enumerated, falling back to primary {}x{}",
+            primary_w, primary_h
+        ));
+        let mut name: Vec<u16> = "DISPLAY".encode_utf16().collect();
+        name.push(0);
+        displays.push(DisplayInfo {
+            name,
+            width: primary_w,
+            height: primary_h,
+            x: 0,
+            y: 0,
+        });
     }
 
     displays

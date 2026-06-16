@@ -58,13 +58,6 @@ extern "system" {
         modifiers: u32,
     ) -> i32;
 
-    fn InternetSetOptionA(
-        internet: *mut std::ffi::c_void,
-        option: u32,
-        buffer: *const std::ffi::c_void,
-        buffer_length: u32,
-    ) -> i32;
-
     fn InternetReadFile(
         file: *mut std::ffi::c_void,
         buffer: *mut u8,
@@ -83,10 +76,6 @@ const INTERNET_OPEN_TYPE_PRECONFIG: u32 = 0;
 const INTERNET_FLAG_RELOAD: u32 = 0x80000000;
 const INTERNET_FLAG_NO_CACHE_WRITE: u32 = 0x04000000;
 const INTERNET_FLAG_SECURE: u32 = 0x00800000;
-const INTERNET_FLAG_IGNORE_CERT_CN_INVALID: u32 = 0x00001000;
-const INTERNET_FLAG_IGNORE_CERT_DATE_INVALID: u32 = 0x00002000;
-const INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTP: u32 = 0x00008000;
-const INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTPS: u32 = 0x00004000;
 const INTERNET_FLAG_KEEP_CONNECTION: u32 = 0x00400000;
 
 const INTERNET_SERVICE_HTTP: u32 = 3;
@@ -96,13 +85,6 @@ const INTERNET_DEFAULT_HTTPS_PORT: u16 = 443;
 const HTTP_ADDREQ_FLAG_ADD: u32 = 0x20000000;
 const HTTP_ADDREQ_FLAG_REPLACE: u32 = 0x80000000;
 
-const INTERNET_OPTION_SECURITY_FLAGS: u32 = 31;
-const SECURITY_FLAG_IGNORE_UNKNOWN_CA: u32 = 0x00000100;
-const SECURITY_FLAG_IGNORE_REVOCATION: u32 = 0x00000080;
-const SECURITY_FLAG_IGNORE_WRONG_USAGE: u32 = 0x00000200;
-const SECURITY_FLAG_IGNORE_CERT_CN_INVALID: u32 = 0x00001000;
-const SECURITY_FLAG_IGNORE_CERT_DATE_INVALID: u32 = 0x00002000;
-
 pub struct ParsedUrl {
     pub host: String,
     pub port: u16,
@@ -110,10 +92,18 @@ pub struct ParsedUrl {
     pub is_https: bool,
 }
 
+pub fn is_https_url(url: &str) -> bool {
+    url.len() >= 8 && url[..8].eq_ignore_ascii_case("https://")
+}
+
+fn is_http_url(url: &str) -> bool {
+    url.len() >= 7 && url[..7].eq_ignore_ascii_case("http://")
+}
+
 pub fn parse_url(url: &str) -> Result<ParsedUrl, String> {
-    let (scheme, rest) = if url.starts_with("https://") {
+    let (scheme, rest) = if is_https_url(url) {
         (true, &url[8..])
-    } else if url.starts_with("http://") {
+    } else if is_http_url(url) {
         (false, &url[7..])
     } else {
         return Err("URL must start with http:// or https://".to_string());
@@ -143,22 +133,6 @@ pub fn parse_url(url: &str) -> Result<ParsedUrl, String> {
     })
 }
 
-fn set_security_flags(handle: *mut std::ffi::c_void) {
-    unsafe {
-        let sec_flags: u32 = SECURITY_FLAG_IGNORE_UNKNOWN_CA
-            | SECURITY_FLAG_IGNORE_REVOCATION
-            | SECURITY_FLAG_IGNORE_WRONG_USAGE
-            | SECURITY_FLAG_IGNORE_CERT_CN_INVALID
-            | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID;
-        InternetSetOptionA(
-            handle,
-            INTERNET_OPTION_SECURITY_FLAGS,
-            &sec_flags as *const u32 as *const std::ffi::c_void,
-            std::mem::size_of::<u32>() as u32,
-        );
-    }
-}
-
 fn read_response(handle: *mut std::ffi::c_void) -> Result<String, String> {
     let mut body = Vec::new();
     let mut buf = [0u8; 4096];
@@ -183,19 +157,15 @@ fn read_response(handle: *mut std::ffi::c_void) -> Result<String, String> {
 fn request_flags(is_https: bool) -> u32 {
     let mut flags = INTERNET_FLAG_RELOAD
         | INTERNET_FLAG_NO_CACHE_WRITE
-        | INTERNET_FLAG_KEEP_CONNECTION
-        | INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTP
-        | INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTPS;
+        | INTERNET_FLAG_KEEP_CONNECTION;
     if is_https {
-        flags |= INTERNET_FLAG_SECURE
-            | INTERNET_FLAG_IGNORE_CERT_CN_INVALID
-            | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID;
+        flags |= INTERNET_FLAG_SECURE;
     }
     flags
 }
 
 pub fn http_get(url: &str) -> Result<String, String> {
-    if url.starts_with("https://") || url.starts_with("HTTPS://") {
+    if is_https_url(url) {
         return crate::tls_client::http_get(url);
     }
     let agent = CString::new("").map_err(|e| e.to_string())?;
@@ -214,8 +184,7 @@ pub fn http_get(url: &str) -> Result<String, String> {
             return Err(format!("InternetOpenA failed (error {})", err));
         }
 
-        let is_https = url.starts_with("https://") || url.starts_with("HTTPS://");
-        let flags = request_flags(is_https);
+        let flags = request_flags(false);
 
         let h_url = InternetOpenUrlA(
             h_internet,
@@ -231,7 +200,6 @@ pub fn http_get(url: &str) -> Result<String, String> {
             return Err(format!("InternetOpenUrlA failed (error {})", err));
         }
 
-        set_security_flags(h_url);
         let result = read_response(h_url);
 
         InternetCloseHandle(h_url);
@@ -301,8 +269,6 @@ fn open_request(
             return Err(format!("HttpOpenRequestA failed (error {})", err));
         }
 
-        set_security_flags(h_request);
-
         HttpAddRequestHeadersA(
             h_request,
             header_c.as_ptr() as *const u8,
@@ -351,7 +317,7 @@ pub fn url_encode(s: &str) -> String {
 }
 
 pub fn http_post_form(url: &str, params: &[(&str, &str)]) -> Result<String, String> {
-    if url.starts_with("https://") || url.starts_with("HTTPS://") {
+    if is_https_url(url) {
         return crate::tls_client::http_post_form(url, params);
     }
     let body: String = params
@@ -369,7 +335,7 @@ pub fn http_post_multipart(
     file_name: &str,
     file_data: &[u8],
 ) -> Result<String, String> {
-    if url.starts_with("https://") || url.starts_with("HTTPS://") {
+    if is_https_url(url) {
         return crate::tls_client::http_post_multipart(url, fields, file_field, file_name, file_data);
     }
     let boundary = "----HopToDesk7b3a4c";

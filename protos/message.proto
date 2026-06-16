@@ -861,7 +861,18 @@ message Misc {
     int32 follow_current_display = 38;
     DisplayResolution change_display_resolution = 39;
     CloseWindow close_window = 40;
+    LinkDashboardRequest link_dashboard_request = 41;
+    LinkDashboardResponse link_dashboard_response = 42;
   }
+}
+
+message LinkDashboardRequest {
+  string invite_code = 1;
+}
+
+message LinkDashboardResponse {
+  bool accepted = 1;
+  string reason = 2;
 }
 	
 message VoiceCallRequest {

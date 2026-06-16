@@ -158,43 +158,53 @@ pub fn run_connect_process(target_id: &str, peer_password: &str, is_file_transfe
             Ok(peer) => {
                 crate::config::write_log(&format!("[connect] Got peer: addr={} public={}", crate::config::mask_ip(&peer.addr), crate::config::mask_ip(&peer.public_addr)));
 
-                let mut unique_addrs = Vec::new();
-                for addr in [&peer.addr, &peer.public_addr] {
-                    if !addr.is_empty() && !unique_addrs.contains(&addr.to_string()) {
-                        unique_addrs.push(addr.to_string());
-                    }
+                enum Race {
+                    Direct(Option<crate::network::FramedStream>),
+                    Turn(Result<crate::network::FramedStream, String>),
                 }
 
-                let mut connected = false;
-                for addr in &unique_addrs {
-                    if let Ok(mut s) = cs.lock() {
-                        s.tcp_connected = false;
-                    }
-                    crate::config::write_log(&format!("[connect] Trying direct TCP to {}...", crate::config::mask_ip(&addr)));
-                    if ft {
-                        client::connect_to_peer_ft(addr, &my_id2, &target, &pw2, cs.clone(), stop.clone());
-                    } else {
-                        client::connect_to_peer(addr, &my_id2, &target, &pw2, cs.clone(), stop.clone());
-                    }
-                    if let Ok(s) = cs.lock() {
-                        if s.tcp_connected {
-                            connected = true;
-                            break;
+                let force_relay =
+                    config::PeerConfig::load(&target).get_option("force-always-relay") == "Y";
+                if force_relay {
+                    crate::config::write_log("[connect] force-always-relay set, skipping direct");
+                }
+
+                let mut unique_addrs = Vec::new();
+                if !force_relay {
+                    for addr in [&peer.addr, &peer.public_addr] {
+                        if !addr.is_empty() && !unique_addrs.contains(&addr.to_string()) {
+                            unique_addrs.push(addr.to_string());
                         }
                     }
                 }
 
-                if !connected {
-                    crate::config::write_log(&format!("[connect] Direct failed, trying TURN relay..."));
-                    if let Ok(mut s) = cs.lock() {
-                        s.status = "connecting".into();
-                        s.error.clear();
+                let (tx, rx) = std::sync::mpsc::channel();
+                let racing_direct = !unique_addrs.is_empty();
+                let mut direct_done = !racing_direct;
+                if racing_direct {
+                    let tx2 = tx.clone();
+                    thread::spawn(move || {
+                        let _ = tx2.send(Race::Direct(client::connect_direct_stream(&unique_addrs)));
+                    });
+                }
+
+                let mut winner = None;
+                if racing_direct {
+                    if let Ok(Race::Direct(opt)) =
+                        rx.recv_timeout(std::time::Duration::from_millis(1000))
+                    {
+                        direct_done = true;
+                        winner = opt;
                     }
+                }
+
+                if winner.is_none() {
+                    crate::config::write_log("[connect] Starting TURN relay...");
 
                     let relay_addr = if !peer.public_addr.is_empty() {
-                        &peer.public_addr
+                        peer.public_addr.clone()
                     } else {
-                        &peer.addr
+                        peer.addr.clone()
                     };
 
                     let (ws_host, ws_port) = {
@@ -202,25 +212,58 @@ pub fn run_connect_process(target_id: &str, peer_password: &str, is_file_transfe
                         (ss.ws_host.clone(), ss.ws_port)
                     };
 
-                    match turn::connect_via_turn(relay_addr, &target, &my_id2, &ws_host, ws_port) {
-                        Ok(stream) => {
-                            crate::config::write_log(&format!("[connect] Connected via TURN relay!"));
-                            if ft {
-                                client::run_client_on_stream_ft(
-                                    stream, &my_id2, &target, &pw2, cs.clone(), stop.clone(),
-                                );
-                            } else {
-                                client::run_client_on_stream(
-                                    stream, &my_id2, &target, &pw2, cs.clone(), stop.clone(),
-                                );
+                    let tx2 = tx.clone();
+                    let target2 = target.clone();
+                    let my_id3 = my_id2.clone();
+                    thread::spawn(move || {
+                        let _ = tx2.send(Race::Turn(turn::connect_via_turn(
+                            &relay_addr, &target2, &my_id3, &ws_host, ws_port,
+                        )));
+                    });
+
+                    let mut turn_done = false;
+                    while winner.is_none() && !(direct_done && turn_done) {
+                        match rx.recv() {
+                            Ok(Race::Direct(opt)) => {
+                                direct_done = true;
+                                if opt.is_some() {
+                                    winner = opt;
+                                }
                             }
+                            Ok(Race::Turn(res)) => {
+                                turn_done = true;
+                                match res {
+                                    Ok(stream) => {
+                                        crate::config::write_log("[connect] Connected via TURN relay!");
+                                        winner = Some(stream);
+                                    }
+                                    Err(e) => {
+                                        crate::config::write_log(&format!("[connect] TURN relay failed: {}", e));
+                                    }
+                                }
+                            }
+                            Err(_) => break,
                         }
-                        Err(e) => {
-                            crate::config::write_log(&format!("[connect] TURN relay failed: {}", e));
-                            if let Ok(mut s) = cs.lock() {
-                                s.status = "error".into();
-                                s.error = "Could not connect (direct + relay failed)".into();
-                            }
+                    }
+                }
+                drop(rx);
+
+                match winner {
+                    Some(stream) => {
+                        if ft {
+                            client::run_client_on_stream_ft(
+                                stream, &my_id2, &target, &pw2, cs.clone(), stop.clone(),
+                            );
+                        } else {
+                            client::run_client_on_stream(
+                                stream, &my_id2, &target, &pw2, cs.clone(), stop.clone(),
+                            );
+                        }
+                    }
+                    None => {
+                        if let Ok(mut s) = cs.lock() {
+                            s.status = "error".into();
+                            s.error = "Could not connect (direct + relay failed)".into();
                         }
                     }
                 }
@@ -243,7 +286,8 @@ pub fn run_connect_process(target_id: &str, peer_password: &str, is_file_transfe
     let home_dir = crate::file_transfer::get_home_dir();
     let html = html_template
         .replace("__HOME_DIR__", &home_dir.replace('\\', "\\\\"))
-        .replace("__IS_FILE_TRANSFER__", if is_file_transfer { "true" } else { "false" });
+        .replace("__IS_FILE_TRANSFER__", if is_file_transfer { "true" } else { "false" })
+        .replace("__DASHBOARD_LINKED__", if crate::dashboard::is_linked() { "true" } else { "false" });
     frame.load_html(html.as_bytes(), Some("this://app/remote.html"));
     frame.set_title("HopToDesk");
 
@@ -507,6 +551,58 @@ unsafe extern "system" fn remote_timer_callback(
                 std::process::exit(0);
             });
             return;
+        }
+    }
+
+    if let Ok(Some(mut el)) = root.find_first("#add-dashboard-flag") {
+        let txt = el.get_text();
+        if !txt.is_empty() {
+            let _ = el.set_text("");
+            crate::config::write_log("[remote] Add to Dashboard requested");
+            let cs2 = client_state.clone();
+            std::thread::spawn(move || {
+                let title = crate::lang::translate("Add to my Dashboard".to_string());
+                match crate::dashboard::get_share_invite() {
+                    Ok(code) => {
+                        if client::send_link_dashboard_request(&cs2, &code) {
+                            crate::win_info(
+                                &crate::lang::translate("Request sent, waiting for the remote user to confirm.".to_string()),
+                                &title,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        crate::config::write_log(&format!("[remote] get_share_invite failed: {}", e));
+                        crate::win_info(&e, &title);
+                    }
+                }
+            });
+        }
+    }
+
+    {
+        let result = match client_state.lock() {
+            Ok(mut cs) => cs.link_dashboard_result.take(),
+            Err(_) => None,
+        };
+        if let Some((accepted, reason)) = result {
+            let text = if accepted {
+                crate::lang::translate("Added to dashboard".to_string())
+            } else {
+                let key = match reason.as_str() {
+                    "invalid_invite" => "The invite code is invalid or expired. Please try again later.",
+                    "link_failed" => "The remote accepted but enrollment failed. They may be offline or unable to reach the dashboard.",
+                    "busy" => "A previous request is still pending on the remote.",
+                    "timeout" => "No response from the remote, request timed out.",
+                    "not_supported" | "unsupported_platform" => "This remote platform isn't supported for dashboard enrollment yet.",
+                    "already_linked" => "This device is already linked to your dashboard.",
+                    _ => "Request declined",
+                };
+                crate::lang::translate(key.to_string())
+            };
+            std::thread::spawn(move || {
+                crate::win_info(&text, &crate::lang::translate("Add to my Dashboard".to_string()));
+            });
         }
     }
 
@@ -938,9 +1034,14 @@ unsafe fn process_file_responses(
                     }
                     let offset = job.offsets[fnum];
 
-                    match crate::file_transfer::write_file_block(&write_path, &block.data, offset) {
+                    let decoded = if block.compressed {
+                        crate::file_transfer::zstd_decompress(&block.data)
+                    } else {
+                        block.data.to_vec()
+                    };
+                    match crate::file_transfer::write_file_block(&write_path, &decoded, offset) {
                         Ok(()) => {
-                            job.offsets[fnum] += block.data.len() as u64;
+                            job.offsets[fnum] += decoded.len() as u64;
 
                             let total_finished: u64 = job.offsets.iter().sum();
                             let _ = root.call_method("jobProgress", &[

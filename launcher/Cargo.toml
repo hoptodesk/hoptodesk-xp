@@ -1,6 +1,6 @@
 [package]
 name = "hoptodesk-xp-launcher"
-version = "1.45.25"
+version = "1.46.2"
 authors = ["hoptodesk <info@hoptodesk.com>"]
 edition = "2021"
 build = "build.rs"

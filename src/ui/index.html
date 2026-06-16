@@ -917,7 +917,7 @@ self.ready = function() {
                     <div class="card-header"><span data-tr="This Device">This Device</span><div style="width:*;"></div><div class="settings-gear" id="settings-gear" title="Settings"></div></div>
                     <div class="card-body">
                         <div>
-                            <div class="id-label" data-tr="Your ID">Your ID</div>
+                            <div class="id-label" id="id-mode-toggle" data-tr="Your ID">Your ID</div>
                             <div id="idbox" class="idbox">Loading...</div>
                         </div>
                         <div>
@@ -1185,6 +1185,7 @@ self.ready = function() {
             <div class="ctx-item" id="ctx-transfer" data-tr="Transfer File">Transfer File</div>
             <div class="ctx-item" id="ctx-wol">WOL</div>
             <div class="ctx-item" id="ctx-set-mac">Set MAC (WOL)</div>
+            <div class="ctx-item" id="ctx-relay" data-tr="Always connect via relay">Always connect via relay</div>
             <div class="ctx-separator"></div>
             <div class="ctx-item" id="ctx-rename" data-tr="Rename">Rename</div>
             <div class="ctx-item" id="ctx-add-fav" data-tr="Add to Favorites">Add to Favorites</div>
@@ -1236,6 +1237,7 @@ self.ready = function() {
     <div id="ctx-menu-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="wol-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="set-mac-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="set-relay-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="set-proxy-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="proxy-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="2fa-generate-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
@@ -1329,6 +1331,8 @@ self.ready = function() {
             // 2FA display
             var tfaOn = $(#2fa-status) && $(#2fa-status).text === "on";
             $(#2fa-display).text = tfaOn ? tr("On") : tr("Off");
+            deviceIdText = $(#idbox).text;
+            updateIdDisplay();
         }
 
         function refreshSettingsState() {
@@ -1379,6 +1383,27 @@ self.ready = function() {
             opts[key] = value;
             try { $(#options-data).text = JSON.stringify(opts); } catch(e) {}
         }
+
+        var deviceIdText = "";
+
+        function updateIdDisplay() {
+            var opts = getOptions();
+            var localIp = opts["local_ip"] || "";
+            var idText = opts["id_formatted"] || deviceIdText;
+            var preferIp = opts["show-local-ip"] == "Y";
+            var showIp = preferIp && localIp != "";
+            var label = $(#id-mode-toggle);
+            label.text = showIp ? tr("Your IP") : tr("Your ID");
+            label.attributes["title"] = showIp ? tr("Switch to ID") : (preferIp ? tr("No local IP available - showing ID") : tr("Switch to local IP"));
+            $(#idbox).text = showIp ? localIp : idText;
+            $(#idbox).attributes["title"] = showIp ? tr("Your local IP address - share this for direct LAN connections") : "";
+        }
+
+        try { $(#id-mode-toggle).onClick = function() {
+            var opts = getOptions();
+            setOptionAndUpdate("show-local-ip", opts["show-local-ip"] == "Y" ? "" : "Y");
+            updateIdDisplay();
+        }; } catch(e) { dbg("FAIL: id-mode-toggle: " + e); }
 
         try {
             var installBtn = $(#install-btn);
@@ -1662,7 +1687,7 @@ self.ready = function() {
                             }
                             content.html = "<div class='dialog-text' style='font-size:0.8em; margin-bottom:8px;'>" + tr("Scan this QR code or enter the secret manually in your authenticator app:") + "</div>" +
                                 qrHtml +
-                                "<div class='dialog-mono' style='margin-bottom:8px; font-size:0.7em;'>" + secret + "</div>" +
+                                "<div class='dialog-mono' style='margin-bottom:8px; font-size:1.1em; font-weight:700; text-align:center; letter-spacing:2px; line-height:1.5;'>" + secret + "</div>" +
                                 "<div class='dialog-label' style='margin-bottom:4px;'>" + tr("Enter your 6-digit code") + "</div>" +
                                 "<input type='text' id='tfa-code-input' class='dialog-input' style='letter-spacing:4px; text-align:center;' maxlength='6' placeholder='000000' />" +
                                 "<div class='dialog-error' id='tfa-verify-error'></div>" +
@@ -1857,6 +1882,11 @@ self.ready = function() {
 
         var ctx_peer_id = "";
         var ctx_is_fav = false;
+        var ctx_relay = false;
+
+        function updateCtxRelayItem() {
+            $(#ctx-relay).text = (ctx_relay ? "✓ " : "") + tr("Always connect via relay");
+        }
 
         function showCtxMenuById(id) {
             if (!id) return;
@@ -1865,6 +1895,15 @@ self.ready = function() {
             ctx_is_fav = false;
             $(#ctx-add-fav).style#display = "block";
             $(#ctx-remove-fav).style#display = "none";
+
+            ctx_relay = false;
+            for (var item in $$(div.session-item)) {
+                if (item.attributes["data-id"] == id) {
+                    ctx_relay = item.attributes["data-relay"] == "Y";
+                    break;
+                }
+            }
+            updateCtxRelayItem();
 
             var menuEl = $(#ctx-menu);
             menuEl.style#left = "80px";
@@ -1887,6 +1926,9 @@ self.ready = function() {
             ctx_is_fav = favEl && (favEl.attributes["class"] || "").indexOf("is-fav") >= 0;
             $(#ctx-add-fav).style#display = ctx_is_fav ? "none" : "block";
             $(#ctx-remove-fav).style#display = ctx_is_fav ? "block" : "none";
+
+            ctx_relay = item.attributes["data-relay"] == "Y";
+            updateCtxRelayItem();
 
             _ctxOverflowEls = [];
             var p = $(#ctx-menu-overlay).parent;
@@ -1942,6 +1984,10 @@ self.ready = function() {
             if (ctx_peer_id) $(#wol-flag).text = ctx_peer_id;
             hideCtxMenu();
         }; } catch(e) { dbg("FAIL: ctx-wol: " + e); }
+        try { $(#ctx-relay).onClick = function() {
+            if (ctx_peer_id) $(#set-relay-flag).text = ctx_peer_id + "|" + (ctx_relay ? "" : "Y");
+            hideCtxMenu();
+        }; } catch(e) { dbg("FAIL: ctx-relay: " + e); }
         try { $(#ctx-set-mac).onClick = function() {
             if (!ctx_peer_id) { hideCtxMenu(); return; }
             hideCtxMenu();

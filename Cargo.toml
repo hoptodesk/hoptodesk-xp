@@ -3,7 +3,7 @@ members = ["launcher"]
 
 [package]
 name = "hoptodesk"
-version = "1.45.25"
+version = "1.46.2"
 authors = ["hoptodesk <info@hoptodesk.com>"]
 edition = "2021"
 rust-version = "1.75"
@@ -45,6 +45,7 @@ serde_json = "1.0"
 lazy_static = "1.4"
 bytes = "1.4"
 flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+ruzstd = "0.6"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "0.26"
 ring = "0.17"

@@ -51,7 +51,9 @@ struct TerminalSession {
     input_tx: Option<SyncSender<Vec<u8>>>,
     output_rx: Receiver<Vec<u8>>,
     output_tx_echo: Option<SyncSender<Vec<u8>>>,
-    line_buffer: String,
+    line_buffer: Vec<char>,
+    cursor: usize,
+    csi: String,
     esc_state: EscState,
     exiting: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
@@ -182,7 +184,13 @@ fn spawn_terminal(terminal_id: i32) -> io::Result<TerminalSession> {
                 match stderr.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        let _ = output_tx.try_send(buf[..n].to_vec());
+                        match output_tx.try_send(buf[..n].to_vec()) {
+                            Ok(_) => {}
+                            Err(TrySendError::Full(v)) => {
+                                let _ = output_tx.send(v);
+                            }
+                            Err(TrySendError::Disconnected(_)) => break,
+                        }
                     }
                     Err(_) => break,
                 }
@@ -196,7 +204,9 @@ fn spawn_terminal(terminal_id: i32) -> io::Result<TerminalSession> {
         input_tx: Some(input_tx),
         output_rx,
         output_tx_echo: Some(output_tx),
-        line_buffer: String::new(),
+        line_buffer: Vec::new(),
+        cursor: 0,
+        csi: String::new(),
         esc_state: EscState::Normal,
         exiting,
         reader: Some(reader),
@@ -275,6 +285,93 @@ fn send_error(stream: &mut FramedStream, terminal_id: i32, message: &str) -> io:
     send_response(stream, resp)
 }
 
+fn line_move_left(s: &mut TerminalSession, echo: &mut String) {
+    if s.cursor > 0 {
+        s.cursor -= 1;
+        echo.push('\u{8}');
+    }
+}
+
+fn line_move_right(s: &mut TerminalSession, echo: &mut String) {
+    if s.cursor < s.line_buffer.len() {
+        echo.push(s.line_buffer[s.cursor]);
+        s.cursor += 1;
+    }
+}
+
+fn line_move_home(s: &mut TerminalSession, echo: &mut String) {
+    while s.cursor > 0 {
+        s.cursor -= 1;
+        echo.push('\u{8}');
+    }
+}
+
+fn line_move_end(s: &mut TerminalSession, echo: &mut String) {
+    while s.cursor < s.line_buffer.len() {
+        echo.push(s.line_buffer[s.cursor]);
+        s.cursor += 1;
+    }
+}
+
+fn line_delete_at(s: &mut TerminalSession, echo: &mut String) {
+    if s.cursor < s.line_buffer.len() {
+        s.line_buffer.remove(s.cursor);
+        let tail: String = s.line_buffer[s.cursor..].iter().collect();
+        let tail_len = s.line_buffer.len() - s.cursor;
+        echo.push_str(&tail);
+        echo.push(' ');
+        for _ in 0..(tail_len + 1) {
+            echo.push('\u{8}');
+        }
+    }
+}
+
+fn line_backspace(s: &mut TerminalSession, echo: &mut String) {
+    if s.cursor > 0 {
+        s.cursor -= 1;
+        echo.push('\u{8}');
+        line_delete_at(s, echo);
+    }
+}
+
+fn line_insert(s: &mut TerminalSession, ch: char, echo: &mut String) {
+    s.line_buffer.insert(s.cursor, ch);
+    let tail: String = s.line_buffer[s.cursor..].iter().collect();
+    let tail_len = s.line_buffer.len() - s.cursor;
+    echo.push_str(&tail);
+    s.cursor += 1;
+    for _ in 0..(tail_len - 1) {
+        echo.push('\u{8}');
+    }
+}
+
+fn line_clear(s: &mut TerminalSession, echo: &mut String) {
+    line_move_end(s, echo);
+    let n = s.line_buffer.len();
+    s.line_buffer.clear();
+    s.cursor = 0;
+    for _ in 0..n {
+        echo.push_str("\u{8} \u{8}");
+    }
+}
+
+fn apply_csi(s: &mut TerminalSession, final_byte: char, echo: &mut String) {
+    match final_byte {
+        'D' => line_move_left(s, echo),
+        'C' => line_move_right(s, echo),
+        'H' => line_move_home(s, echo),
+        'F' => line_move_end(s, echo),
+        '~' => match s.csi.as_str() {
+            "1" | "7" => line_move_home(s, echo),
+            "4" | "8" => line_move_end(s, echo),
+            "3" => line_delete_at(s, echo),
+            _ => {}
+        },
+        _ => {}
+    }
+    s.csi.clear();
+}
+
 fn handle_action(
     stream: &mut FramedStream,
     sessions: &mut HashMap<i32, TerminalSession>,
@@ -318,13 +415,21 @@ fn handle_action(
                 let pid = session.pid;
                 for ch in input_str.chars() {
                     if session.esc_state == EscState::Esc {
-                        session.esc_state = if ch == '[' { EscState::Csi } else { EscState::Normal };
+                        if ch == '[' {
+                            session.csi.clear();
+                            session.esc_state = EscState::Csi;
+                        } else {
+                            session.esc_state = EscState::Normal;
+                        }
                         continue;
                     }
                     if session.esc_state == EscState::Csi {
                         let code = ch as u32;
                         if (0x40..=0x7E).contains(&code) {
+                            apply_csi(session, ch, &mut echo);
                             session.esc_state = EscState::Normal;
+                        } else {
+                            session.csi.push(ch);
                         }
                         continue;
                     }
@@ -333,28 +438,24 @@ fn handle_action(
                         continue;
                     }
                     if ch == '\r' || ch == '\n' {
-                        let line = std::mem::take(&mut session.line_buffer);
+                        let line: String = session.line_buffer.iter().collect();
+                        session.line_buffer.clear();
+                        session.cursor = 0;
                         echo.push_str("\r\n");
                         let mut payload = line.into_bytes();
                         payload.extend_from_slice(b"\r\n");
                         to_send.push(payload);
                     } else if ch == '\x7f' || ch == '\x08' {
-                        if session.line_buffer.pop().is_some() {
-                            echo.push_str("\x08 \x08");
-                        }
+                        line_backspace(session, &mut echo);
                     } else if ch == '\x15' {
-                        let len = session.line_buffer.chars().count();
-                        session.line_buffer.clear();
-                        for _ in 0..len {
-                            echo.push_str("\x08 \x08");
-                        }
+                        line_clear(session, &mut echo);
                     } else if ch == '\x03' {
                         session.line_buffer.clear();
+                        session.cursor = 0;
                         ctrl_c = true;
                     } else if ch == '\t' {
                     } else if ch >= ' ' {
-                        session.line_buffer.push(ch);
-                        echo.push(ch);
+                        line_insert(session, ch, &mut echo);
                     }
                 }
                 if !echo.is_empty() {
@@ -457,11 +558,21 @@ pub fn run_terminal_loop(stream: &mut FramedStream, stop: &Arc<AtomicBool>) -> i
         .ok();
 
     let mut sessions: HashMap<i32, TerminalSession> = HashMap::new();
+    let mut last_keepalive = std::time::Instant::now();
 
     loop {
         if stop.load(Ordering::Relaxed) {
             crate::config::write_log("[terminal] Stop flag set, exiting loop");
             break;
+        }
+
+        if last_keepalive.elapsed() >= Duration::from_secs(3) {
+            last_keepalive = std::time::Instant::now();
+            let mut td = message_proto::TestDelay::new();
+            td.from_client = false;
+            let mut msg = message_proto::Message::new();
+            msg.set_test_delay(td);
+            stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
         }
 
         match stream.recv_msg() {
@@ -471,14 +582,7 @@ pub fn run_terminal_loop(stream: &mut FramedStream, stop: &Arc<AtomicBool>) -> i
                         Some(message_proto::message::Union::TerminalAction(ta)) => {
                             handle_action(stream, &mut sessions, ta)?;
                         }
-                        Some(message_proto::message::Union::TestDelay(td)) => {
-                            let mut resp = message_proto::TestDelay::new();
-                            resp.time = td.time;
-                            resp.last_delay = td.last_delay;
-                            resp.from_client = false;
-                            let mut reply = message_proto::Message::new();
-                            reply.set_test_delay(resp);
-                            stream.send_msg(&reply.write_to_bytes().map_err(io_err)?)?;
+                        Some(message_proto::message::Union::TestDelay(_td)) => {
                         }
                         Some(message_proto::message::Union::Misc(misc)) => {
                             if let Some(message_proto::misc::Union::CloseReason(reason)) = misc.union {

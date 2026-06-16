@@ -146,6 +146,14 @@ pub fn append_chat_message(session_id: &str, from: &str, text: &str) {
     }
 }
 
+pub fn cm_link_request_path(session_id: &str) -> PathBuf {
+    cm_temp_dir().join(format!("hoptodesk_cm_{}.linkreq", session_id))
+}
+
+pub fn cm_link_response_path(session_id: &str) -> PathBuf {
+    cm_temp_dir().join(format!("hoptodesk_cm_{}.linkresp", session_id))
+}
+
 pub fn cm_perm_path(session_id: &str) -> PathBuf {
     cm_temp_dir().join(format!("hoptodesk_cm_{}.perm", session_id))
 }
@@ -197,6 +205,8 @@ pub fn cleanup_cm_files(session_id: &str) {
     let _ = std::fs::remove_file(cm_chat_send_path(session_id));
     let _ = std::fs::remove_file(cm_perm_path(session_id));
     let _ = std::fs::remove_file(cm_ended_path(session_id));
+    let _ = std::fs::remove_file(cm_link_request_path(session_id));
+    let _ = std::fs::remove_file(cm_link_response_path(session_id));
 }
 
 pub fn spawn_cm_process(session_id: &str) {
@@ -358,6 +368,29 @@ unsafe extern "system" fn cm_timer_callback(
     if CM_RESPONDED && !cm_info_path(&session_id).exists() {
         crate::config::write_log("[cm] Session ended (info file removed), exiting");
         std::process::exit(0);
+    }
+
+    let link_req = cm_link_request_path(&session_id);
+    if let Ok(account) = std::fs::read_to_string(&link_req) {
+        let _ = std::fs::remove_file(&link_req);
+        let sid2 = session_id.clone();
+        std::thread::spawn(move || {
+            let who = {
+                let trimmed = account.trim();
+                if trimmed.is_empty() {
+                    read_peer_info(&sid2).1
+                } else {
+                    trimmed.to_string()
+                }
+            };
+            let intro = crate::lang::translate("{} is inviting this computer to join their dashboard.".to_string())
+                .replace("{}", &who);
+            let detail = crate::lang::translate("They will be able to see when this computer is online and provide remote support. You can undo this anytime in Settings → Dashboard.".to_string());
+            let title = crate::lang::translate("Accept Dashboard Invite?".to_string());
+            let accepted = crate::win_confirm(&format!("{}\n\n{}", intro, detail), &title);
+            crate::config::write_log(&format!("[cm] Dashboard invite {}", if accepted { "accepted" } else { "declined" }));
+            let _ = std::fs::write(cm_link_response_path(&sid2), if accepted { "Y" } else { "N" });
+        });
     }
 
     let root = match sciter::Element::from_window(hwnd) {

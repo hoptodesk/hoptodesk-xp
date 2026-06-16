@@ -34,6 +34,8 @@ pub struct ClientState {
     pub recorder: Option<crate::recording::Recorder>,
 
     pub tcp_connected: bool,
+
+    pub link_dashboard_result: Option<(bool, String)>,
 }
 
 pub struct DisplayMeta {
@@ -64,6 +66,7 @@ impl Default for ClientState {
             recording: false,
             recorder: None,
             tcp_connected: false,
+            link_dashboard_result: None,
         }
     }
 }
@@ -117,6 +120,22 @@ pub fn connect_to_peer_ft(
             state.status = "closed".into();
         }
     }
+}
+
+pub fn connect_direct_stream(addrs: &[String]) -> Option<FramedStream> {
+    for addr in addrs {
+        crate::config::write_log(&format!("[client] Trying direct TCP to {}...", crate::config::mask_ip(addr)));
+        match FramedStream::connect(addr, Duration::from_millis(2500)) {
+            Ok(stream) => {
+                crate::config::write_log(&format!("[client] Connected to {}", crate::config::mask_ip(addr)));
+                return Some(stream);
+            }
+            Err(e) => {
+                crate::config::write_log(&format!("[client] Direct connect to {} failed: {}", crate::config::mask_ip(addr), e));
+            }
+        }
+    }
+    None
 }
 
 pub fn run_client_on_stream(
@@ -811,7 +830,42 @@ fn handle_misc_from_server(misc: &message_proto::Misc, client_state: &Arc<Mutex<
                 }
             }
         }
+        Some(message_proto::misc::Union::LinkDashboardResponse(resp)) => {
+            crate::config::write_log(&format!(
+                "[client] LinkDashboardResponse: accepted={} reason={}",
+                resp.accepted, resp.reason
+            ));
+            if let Ok(mut state) = client_state.lock() {
+                state.link_dashboard_result = Some((resp.accepted, resp.reason.clone()));
+            }
+        }
         _ => {}
+    }
+    false
+}
+
+pub fn send_link_dashboard_request(client_state: &Arc<Mutex<ClientState>>, invite_code: &str) -> bool {
+    let stream = {
+        let s = match client_state.lock() {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        match &s.input_stream {
+            Some(st) => st.clone(),
+            None => return false,
+        }
+    };
+
+    let mut req = message_proto::LinkDashboardRequest::new();
+    req.invite_code = invite_code.to_string();
+    let mut misc = message_proto::Misc::new();
+    misc.union = Some(message_proto::misc::Union::LinkDashboardRequest(req));
+    let mut msg = message_proto::Message::new();
+    msg.set_misc(misc);
+    if let Ok(bytes) = msg.write_to_bytes() {
+        if let Ok(mut s) = stream.lock() {
+            return s.send_msg(&bytes).is_ok();
+        }
     }
     false
 }
