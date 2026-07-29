@@ -34,12 +34,6 @@ mod websocket;
 mod tls_client;
 mod wininet;
 
-extern "C" {
-    fn SciterAPI() -> *const std::ffi::c_void;
-}
-#[used]
-static FORCE_SCITER_IMPORT: unsafe extern "C" fn() -> *const std::ffi::c_void = SciterAPI;
-
 use std::sync::{Arc, Mutex};
 use std::process::Stdio;
 use std::thread;
@@ -233,6 +227,38 @@ pub fn win_confirm(text: &str, title: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
+pub fn win_confirm_warn(text: &str, title: &str) -> bool {
+    use std::ffi::OsStr;
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(
+            hwnd: *mut std::ffi::c_void,
+            text: *const u16,
+            caption: *const u16,
+            utype: u32,
+        ) -> i32;
+    }
+    const MB_YESNO: u32 = 0x00000004;
+    const MB_ICONWARNING: u32 = 0x00000030;
+    const MB_SETFOREGROUND: u32 = 0x00010000;
+    const MB_TOPMOST: u32 = 0x00040000;
+    const IDYES: i32 = 6;
+    let text_w: Vec<u16> = OsStr::new(text).encode_wide().chain(once(0)).collect();
+    let title_w: Vec<u16> = OsStr::new(title).encode_wide().chain(once(0)).collect();
+    let result = unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text_w.as_ptr(),
+            title_w.as_ptr(),
+            MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST,
+        )
+    };
+    result == IDYES
+}
+
+#[cfg(target_os = "windows")]
 pub fn win_info(text: &str, title: &str) {
     use std::ffi::OsStr;
     use std::iter::once;
@@ -419,7 +445,38 @@ fn run_uninstall_with_ui() {
     }
 }
 
+const CARD_SVG_WINDOWS: &str = "<svg class=\"session-plat\" viewBox=\"0 0 448 512\"><path d=\"M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"20\"/></svg>";
+const CARD_SVG_MAC: &str = "<svg class=\"session-plat\" viewBox=\"0 0 384 512\"><path d=\"M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"20\"/></svg>";
+const CARD_SVG_LINUX: &str = "<svg class=\"session-plat\" viewBox=\"0 0 256 256\"><g transform=\"translate(0 256) scale(.1 -.1)\" fill=\"#FFFFFF\"><path d=\"m1215 2537c-140-37-242-135-286-278-23-75-23-131 1-383l18-200-54-60c-203-224-383-615-384-831v-51l-66-43c-113-75-194-199-194-300 0-110 99-234 244-305 103-50 185-69 296-69 100 0 156 14 211 54 26 18 35 19 78 10 86-18 233-24 335-12 85 10 222 38 269 56 9 4 19-7 29-35 20-50 52-64 136-57 98 8 180 52 282 156 124 125 180 244 180 380 0 80-28 142-79 179l-36 26 4 119c5 175-22 292-105 460-74 149-142 246-286 409-43 49-78 92-78 97 0 4-7 52-15 107-8 54-19 140-24 189-13 121-41 192-103 260-95 104-248 154-373 122zm172-112c62-19 134-80 163-140 15-31 28-92 41-193 27-214 38-276 57-304 9-14 59-74 111-134 92-106 191-246 236-334 69-137 115-339 101-451l-7-55-71 10c-100 13-234-5-265-36-54-55-85-207-82-412l1-141-51-17c-104-34-245-51-380-45-69 3-142 10-162 16-32 10-37 17-53 68-23 72-87 201-136 273-80 117-158 188-237 215-37 13-37 13-34 61 13 211 182 555 373 759 57 62 58 63 58 121 0 33-9 149-19 259-21 224-18 266 26 347 67 122 193 174 330 133zm687-1720c32-9 71-25 87-36 60-42 59-151-4-274-59-119-221-250-317-257-34-3-35-2-48 47-18 65-20 329-3 413 16 83 29 110 55 115 51 10 177 6 230-8zm-1418-80c79-46 187-195 247-340 41-99 43-121 12-141-39-25-148-30-238-10-142 32-264 112-307 202-20 41-21 50-10 87 24 83 102 166 192 207 54 25 53 25 104-5z\"/><path d=\"m1395 1945c-92-16-220-52-256-70-28-15-29-18-29-89 0-247 165-397 345-312 60 28 77 46 106 111 54 123 0 378-80 374-9 0-47-7-86-14zm74-156c15-69 14-112-5-159s-55-70-111-70c-48 0-78 20-102 68-15 29-41 131-41 159 0 9 230 63 242 57 3-2 11-27 17-55z\"/></g></svg>";
+const CARD_SVG_ANDROID: &str = "<svg class=\"session-plat\" viewBox=\"0 0 553 553\"><path d=\"M77 179a33 33 0 0 0-25 10 33 33 0 0 0-9 24v143a33 33 0 0 0 10 24 33 33 0 0 0 24 10c9 0 17-3 24-10a33 33 0 0 0 10-24V213c0-9-4-17-10-24a33 33 0 0 0-24-10zM352 51l24-44c1-3 1-5-2-6-3-2-5-1-7 2l-24 43a163 163 0 0 0-133 0L186 3c-2-3-4-4-7-2-2 1-3 3-1 6l23 44c-24 12-43 29-57 51a129 129 0 0 0-21 72h307c0-26-7-50-21-72a146 146 0 0 0-57-51zm-136 63a13 13 0 0 1-10 4 13 13 0 0 1-12-13c0-4 1-7 3-9 3-3 6-4 9-4s7 1 10 4c2 2 3 5 3 9s-1 7-3 9zm140 0a12 12 0 0 1-9 4c-4 0-7-1-9-4a12 12 0 0 1-4-9c0-4 1-7 4-9 2-3 5-4 9-4a12 12 0 0 1 9 4c2 2 3 5 3 9s-1 7-3 9zM124 407c0 10 4 19 11 26s15 10 26 10h24v76c0 9 4 17 10 24s15 10 24 10c10 0 18-3 25-10s10-15 10-24v-76h45v76c0 9 4 17 10 24s15 10 25 10c9 0 17-3 24-10s10-15 10-24v-76h25a35 35 0 0 0 25-10c7-7 11-16 11-26V185H124v222zm352-228a33 33 0 0 0-24 10 33 33 0 0 0-10 24v143a34 34 0 0 0 34 34c10 0 18-3 25-10s10-15 10-24V213c0-9-4-17-10-24a33 33 0 0 0-25-10z\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"20\"/></svg>";
+const CARD_HEART_FILLED: &str = "<svg viewBox=\"0 0 24 24\"><path d=\"M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z\" fill=\"#FFFFFF\"/></svg>";
+const CARD_HEART_OUTLINE: &str = "<svg viewBox=\"0 0 24 24\"><path d=\"M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"2\"/></svg>";
+const CARD_MENU_DOTS: &str = "<svg viewBox=\"0 0 512 512\" fill=\"currentColor\"><circle cx=\"256\" cy=\"64\" r=\"64\"/><circle cx=\"256\" cy=\"256\" r=\"64\"/><circle cx=\"256\" cy=\"448\" r=\"64\"/></svg>";
+
+fn platform_card_svg(platform: &str) -> &'static str {
+    match platform.to_lowercase().as_str() {
+        "linux" | "freebsd" => CARD_SVG_LINUX,
+        "mac os" | "macos" | "mac" => CARD_SVG_MAC,
+        "android" | "ios" => CARD_SVG_ANDROID,
+        _ => CARD_SVG_WINDOWS,
+    }
+}
+
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_default();
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic payload".to_string()
+        };
+        crate::config::write_log(&format!("[panic] {} at {}", msg, location));
+    }));
     config::cleanup_old_logs();
     crate::config::write_log(&format!("[main] HopToDesk {} starting", VERSION));
 
@@ -589,11 +646,6 @@ fn check_invite_code_from_filename() {
             cfg2.set_option("invite_code", invite_code);
             cfg2.save();
             crate::config::write_log(&format!("[init] Invite code from filename: {}", invite_code));
-        } else if !has_uppercase && (id_end == 16 || id_end == 32) {
-            let team_id = &id_part[..id_end];
-            let team_path = config::config_dir().join("TeamID.toml");
-            let _ = std::fs::write(&team_path, team_id);
-            crate::config::write_log(&format!("[init] TeamID from filename: {}", team_id));
         }
     }
 }
@@ -634,10 +686,23 @@ fn run_headless_server() {
     signal::run_signal_loop(my_id, password, pk, signal_state);
 }
 
+fn ui_shared_resources() -> Vec<(&'static str, &'static [u8])> {
+    vec![
+        ("common.css", include_bytes!("ui/common.css").as_slice()),
+        ("index.css", include_bytes!("ui/index.css").as_slice()),
+        ("font.css", include_bytes!("ui/font.css").as_slice()),
+        ("common.tis", include_bytes!("ui/common.tis").as_slice()),
+        ("msgbox.tis", include_bytes!("ui/msgbox.tis").as_slice()),
+        ("install.tis", include_bytes!("ui/install.tis").as_slice()),
+        ("ticket.tis", include_bytes!("ui/ticket.tis").as_slice()),
+    ]
+}
+
 fn run_ticket_window() {
     sciter::set_options(sciter::RuntimeOptions::GfxLayer(sciter::GFX_LAYER::CPU)).ok();
     let mut frame = sciter::Window::new();
     let html = include_str!("ui/ticket.html");
+    frame.register_resources(&ui_shared_resources());
     frame.load_html(html.as_bytes(), Some("this://app/ticket.html"));
     frame.set_title("HopToDesk - Tickets");
     let hwnd = frame.get_hwnd();
@@ -650,6 +715,7 @@ fn run_install_window() {
     let mut frame = sciter::Window::new();
     let html = include_str!("ui/install.html");
     frame.event_handler(MainHandler);
+    frame.register_resources(&ui_shared_resources());
     frame.load_html(html.as_bytes(), Some("this://app/install.html"));
     frame.set_title("HopToDesk");
     let hwnd = frame.get_hwnd();
@@ -736,38 +802,24 @@ fn run_main_ui() {
 
     let service_running = install::is_installed();
     if service_running {
-        crate::config::write_log("[main] service is installed; UI will read status from service rather than running its own loops");
+        crate::config::write_log("[main] service is installed; UI mirrors its status and connects itself only if it goes away");
+    }
+    {
         let state_clone = state.clone();
         thread::spawn(move || {
-            loop {
-                let status = cm::read_service_status().unwrap_or_else(|| "offline".into());
-                if let Ok(s) = state_clone.lock() {
-                    if let Ok(mut sig) = s.signal_state.lock() {
-                        if sig.status != status {
-                            sig.status = status.clone();
-                            sig.error.clear();
-                        }
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_millis(500));
-            }
+            let (my_id, password, pk, signal_state) = {
+                let s = state_clone.lock().unwrap();
+                (
+                    s.config.id.clone(),
+                    s.config.password.clone(),
+                    s.config.key_pair.1.clone(),
+                    s.signal_state.clone(),
+                )
+            };
+            signal::run_signal_loop_ex(my_id, password, pk, signal_state, true);
         });
-    } else {
-        {
-            let state_clone = state.clone();
-            thread::spawn(move || {
-                let (my_id, password, pk, signal_state) = {
-                    let s = state_clone.lock().unwrap();
-                    (
-                        s.config.id.clone(),
-                        s.config.password.clone(),
-                        s.config.key_pair.1.clone(),
-                        s.signal_state.clone(),
-                    )
-                };
-                signal::run_signal_loop(my_id, password, pk, signal_state);
-            });
-        }
+    }
+    if !service_running {
 
         {
             let state_clone = state.clone();
@@ -846,20 +898,16 @@ fn run_main_ui() {
     };
 
     let is_installed_now = crate::install::is_installed();
-    let (install_style, uninstall_style) = if is_installed_now {
-        ("display:none; margin-left:16px;", "display:inline-block; margin-left:16px;")
+    let install_style = if is_installed_now {
+        "display:none; margin-left:16px;"
     } else {
-        ("display:inline-block; margin-left:16px;", "display:none; margin-left:16px;")
+        "display:inline-block; margin-left:16px;"
     };
 
     let html = html_template
         .replace(
             "id=\"install-btn\" style=\"display:none; margin-left:16px;\"",
             &format!("id=\"install-btn\" style=\"{}\"", install_style),
-        )
-        .replace(
-            "id=\"uninstall-btn\" style=\"display:none; margin-left:16px;\"",
-            &format!("id=\"uninstall-btn\" style=\"{}\"", uninstall_style),
         )
         .replace("Loading...", &id_formatted)
         .replace("------", &my_password)
@@ -939,7 +987,7 @@ unsafe extern "system" fn main_timer_callback(
     }
 
     TIMER_TICK += 1;
-    if TIMER_TICK % 3 == 0 {
+    if TIMER_TICK % 10 == 0 {
         let disk_cfg = config::Config::load();
         let mut pw_changed = false;
         if let Ok(mut s) = state.lock() {
@@ -961,12 +1009,6 @@ unsafe extern "system" fn main_timer_callback(
             let _ = btn.set_style_attribute(
                 "display",
                 if installed { "none" } else { "inline-block" },
-            );
-        }
-        if let Ok(Some(mut btn)) = root.find_first("#uninstall-btn") {
-            let _ = btn.set_style_attribute(
-                "display",
-                if installed { "inline-block" } else { "none" },
             );
         }
     }
@@ -1375,44 +1417,32 @@ unsafe extern "system" fn main_timer_callback(
                         let peer_cfg = config::PeerConfig::load(&p.id);
                         let is_fav = s.local_config.is_fav(&p.id);
                         let fav_class = if is_fav { "session-fav is-fav" } else { "session-fav" };
-                        let fav_char = if is_fav { "&#9733;" } else { "&#9734;" };
+                        let heart = if is_fav { CARD_HEART_FILLED } else { CARD_HEART_OUTLINE };
                         let display_name = if !peer_cfg.alias.is_empty() {
                             peer_cfg.alias.clone()
                         } else {
                             display_id.clone()
                         };
-                        let sub = if !peer_cfg.alias.is_empty() {
-                            display_id.clone()
-                        } else if !p.hostname.is_empty() {
-                            if !p.username.is_empty() {
+                        let caption = if !p.hostname.is_empty() {
+                            if !p.username.is_empty() && p.username != "android" && p.username != "ios" {
                                 format!("{}@{}", p.username, p.hostname)
                             } else {
                                 p.hostname.clone()
                             }
                         } else {
-                            String::new()
-                        };
-
-                        let plat_label = match p.platform.to_lowercase().as_str() {
-                            "windows" => "Win",
-                            "linux" => "Lin",
-                            "mac os" | "macos" => "Mac",
-                            "android" => "And",
-                            _ if !p.platform.is_empty() => &p.platform[..3.min(p.platform.len())],
-                            _ => &p.id[p.id.len().saturating_sub(2)..],
+                            display_id.clone()
                         };
 
                         items_html.push_str(&format!(
                             "<div class=\"session-item\" data-id=\"{}\" data-relay=\"{}\">\
-                                <div class=\"session-platform\">{}</div>\
-                                <div class=\"session-info\">\
-                                    <div class=\"session-name\">{}</div>\
-                                    <div class=\"session-sub\">{}</div>\
-                                </div>\
+                                <div class=\"session-tile\">{}<div class=\"session-caption\">{}</div></div>\
                                 <div class=\"{}\">{}</div>\
-                                <div class=\"session-menu\">...</div>\
+                                <div class=\"session-strip\">\
+                                    <div class=\"session-name\">{}</div>\
+                                    <div class=\"session-menu\">{}</div>\
+                                </div>\
                             </div>",
-                            p.id, peer_cfg.get_option("force-always-relay"), plat_label, display_name, sub, fav_class, fav_char
+                            p.id, peer_cfg.get_option("force-always-relay"), platform_card_svg(&p.platform), crate::cm::html_escape(&caption), fav_class, heart, crate::cm::html_escape(&display_name), CARD_MENU_DOTS
                         ));
                     }
                 }

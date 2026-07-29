@@ -73,16 +73,22 @@
         .settings-gear {
             margin-left: auto;
             cursor: pointer;
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            color: #6C757D;
+            text-align: center;
+        }
+
+        .settings-gear svg {
             width: 18px;
             height: 18px;
-            background: no-repeat center center;
-            background-size: contain;
-            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA+ElEQVR42u1XwQ3DIAzMBoyQURiBEfh0hP4ZoEMwCiN0BI/QEShIRooowaEY0VSxdA9kOz4szpBluexsdrs/1gAVYDaI63V0YR3wDPAVRL/mLiwDgCicI8ZLrl37DuiZxb8ngW33jJCtBICZAMxofYJr6sABqUW8AizOAIvrfiXgkPEHtC6yPFEgDuhTSBLIYYXB1M7FTq7Y6cQWiiJgiA9YIt8S+aaXgBmZ/xMdmH4GVjytNgUXhtI4FTTchGPmQFbYTZmE0+8C4jaECrmaT3K9ByT6PopUiLM9Shwh1aQax1K8oARJDBtbih/xOgaWg3a6/4LL/tbeQoy7BGBwGKMAAAAASUVORK5CYII=');
-            opacity: 0.6;
+            margin: * 0;
         }
 
         .settings-gear:hover {
-            opacity: 1.0;
+            color: #1E293B;
+            background: #F1F5F9;
         }
 
         .card-body {
@@ -237,88 +243,108 @@
         }
 
         .sessions-list {
-            flow: vertical;
-            padding: 4px 8px;
+            flow: horizontal-flow;
+            padding: 10px;
+            border-spacing: 10px;
             overflow-y: scroll-indicator;
             height: *;
         }
 
         .session-item {
-            flow: horizontal;
-            vertical-align: middle;
-            padding: 4px 0;
-            border-radius: 10px;
+            width: 150px;
+            height: 120px;
+            border-radius: 12px;
             cursor: pointer;
             background: white;
             box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-            margin-bottom: 4px;
-            height: 52px;
+            position: relative;
         }
 
         .session-item:hover {
             outline: 1px solid #CBD5E1;
         }
 
-        .session-platform {
-            width: 42px;
-            min-width: 42px;
-            height: 42px;
-            background: #2C8CFF;
-            border-radius: 8px;
+        .session-tile {
+            width: 150px;
+            height: 84px;
+            background: #93C5FD;
+            border-radius: 12px;
             text-align: center;
-            vertical-align: middle;
-            font-size: 0.65em;
-            font-weight: 700;
-            color: white;
-            margin: 4px 0 4px 6px;
+            position: relative;
         }
 
-        .session-info {
-            flow: vertical;
-            size: *;
-            padding-left: 10px;
-            padding-top: 6px;
-            padding-bottom: 6px;
+        .session-tile svg.session-plat {
+            width: 36px;
+            height: 36px;
+            margin: 16px * 0 *;
+        }
+
+        .session-caption {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 3px;
+            color: #F8FAFC;
+            font-size: 0.65em;
+            font-weight: 600;
+            text-align: center;
             overflow: hidden;
-            vertical-align: middle;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            padding: 0 6px;
+        }
+
+        .session-strip {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            height: 36px;
+            flow: horizontal;
         }
 
         .session-name {
-            font-size: 0.9em;
+            width: *;
+            margin: * 0;
+            padding-left: 10px;
+            font-size: 0.85em;
             font-weight: 600;
             color: #1E293B;
             overflow: hidden;
             white-space: nowrap;
-        }
-
-        .session-sub {
-            font-size: 0.7em;
-            color: #393E46;
-            font-weight: 600;
-            overflow: hidden;
-            white-space: nowrap;
-            margin-top: 2px;
+            text-overflow: ellipsis;
         }
 
         .session-fav {
-            font-size: 0.85em;
-            color: #CBD5E1;
+            position: absolute;
+            right: 5px;
+            top: 5px;
+            width: 20px;
+            height: 20px;
             cursor: pointer;
-            padding: 4px;
-            vertical-align: middle;
+            text-align: center;
         }
 
-        .session-fav.is-fav {
-            color: #F59E0B;
+        .session-fav svg {
+            width: 16px;
+            height: 16px;
+            margin: * 0;
         }
 
         .session-menu {
-            font-size: 1em;
+            width: 24px;
+            height: 24px;
+            margin: * 6px * 0;
             color: #94A3B8;
             cursor: pointer;
-            padding: 4px 8px;
-            vertical-align: middle;
             border-radius: 6px;
+            text-align: center;
+        }
+
+        .session-menu svg {
+            width: 14px;
+            height: 14px;
+            margin: * 0;
         }
 
         .session-menu:hover {
@@ -747,8 +773,8 @@
         html.darktheme .sessions-tab span.inactive:hover { color: #94A3B8; background: #2a2a4a; }
         html.darktheme .session-item { background: #1a1a2e; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         html.darktheme .session-item:hover { outline-color: #475569; }
+        html.darktheme .session-tile { background: #64748B; }
         html.darktheme .session-name { color: #E2E8F0; }
-        html.darktheme .session-sub { color: #94A3B8; }
         html.darktheme .session-menu:hover { background: #2a2a4a; color: #E2E8F0; }
         html.darktheme .ua-section { border-top-color: #2a2a4a; }
         html.darktheme input[type=text], html.darktheme input[type=password] { background: #1a1a2e; border-color: #475569; color: #E2E8F0; }
@@ -914,7 +940,7 @@ self.ready = function() {
         <div class="main-content">
             <div class="cards-row">
                 <div class="card-device">
-                    <div class="card-header"><span data-tr="This Device">This Device</span><div style="width:*;"></div><div class="settings-gear" id="settings-gear" title="Settings"></div></div>
+                    <div class="card-header"><span data-tr="This Device">This Device</span><div style="width:*;"></div><div class="settings-gear" id="settings-gear" title="Settings"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/></svg></div></div>
                     <div class="card-body">
                         <div>
                             <div class="id-label" id="id-mode-toggle" data-tr="Your ID">Your ID</div>
@@ -1092,7 +1118,6 @@ self.ready = function() {
             <div class="about-link" id="link-agpl">This software is licensed under AGPL 3.0</div>
             <div class="about-link" id="link-source">Source code is available here</div>
             <div style="height:8px;"></div>
-            <div class="about-copyright">This Application uses Sciter Engine, copyright Terra Informatica Software, Inc.</div>
             <div class="about-copyright">Copyright HopToDesk. Originally forked from RustDesk.</div>
             <div style="height:8px;"></div>
             <button class="button" id="about-close" data-tr="OK">OK</button>
@@ -1416,6 +1441,7 @@ self.ready = function() {
             dbg("OK: install-btn");
         } catch(e) { dbg("FAIL: install-btn: " + e); }
 
+
         try { $(#ua-set-btn).onClick = function() { openPwSettings(); }; dbg("OK: ua-set-btn"); } catch(e) { dbg("FAIL: ua-set-btn: " + e); }
 
         try { $(#sw-ua).onClick = function() {
@@ -1600,8 +1626,8 @@ self.ready = function() {
 
         // --- 2FA dialog ---
         // NOTE: All button handlers are attached via .onClick AFTER creating
-        // dynamic elements. Using "event click $(#id)" for non-existent elements
-        // crashes old XP Sciter and kills all subsequent handler registrations.
+        // dynamic elements; "event click $(#id)" must not be used for elements
+        // that do not exist yet.
 
         function bind2faCloseBtn() {
             var btn = $(#tfa-close-btn);
@@ -1854,26 +1880,43 @@ self.ready = function() {
         }; dbg("OK: tab-fav"); } catch(e) { dbg("FAIL: tab-fav: " + e); }
 
         // Session items and 3-dot menu use event delegation (class selectors, elements exist)
+        function eventOnCardAction(evt) {
+            var t = evt ? evt.target : null;
+            while (t) {
+                var cls = (t.attributes ? t.attributes["class"] : "") || "";
+                if (cls.indexOf("session-item") >= 0) return false;
+                if (cls.indexOf("session-fav") >= 0 || cls.indexOf("session-menu") >= 0) return true;
+                t = t.parent;
+            }
+            return false;
+        }
+
         event click $(div.session-item) (evt, el) {
+            if (eventOnCardAction(evt)) return;
             var id = el.attributes["data-id"];
             if (id) $(#remote-id).value = formatId(id);
         }
 
         event dblclick $(div.session-item) (evt, el) {
+            if (eventOnCardAction(evt)) return;
             var id = el.attributes["data-id"];
             if (id) $(#connect-target).text = id;
         }
 
+        function sessionIdOf(el) {
+            var item = el;
+            while (item && !item.attributes["data-id"]) item = item.parent;
+            return item ? item.attributes["data-id"] : null;
+        }
+
         event click $(.session-fav) (evt, el) {
-            var item = el.parent;
-            var id = item.attributes["data-id"];
+            var id = sessionIdOf(el);
             if (id) $(#fav-toggle-flag).text = id;
             return true;
         }
 
         event click $(.session-menu) (evt, el) {
-            var item = el.parent;
-            var id = item.attributes["data-id"];
+            var id = sessionIdOf(el);
             if (id) $(#ctx-menu-flag).text = id;
             return true;
         }
@@ -1890,25 +1933,13 @@ self.ready = function() {
 
         function showCtxMenuById(id) {
             if (!id) return;
-            ctx_peer_id = id;
-
-            ctx_is_fav = false;
-            $(#ctx-add-fav).style#display = "block";
-            $(#ctx-remove-fav).style#display = "none";
-
-            ctx_relay = false;
             for (var item in $$(div.session-item)) {
                 if (item.attributes["data-id"] == id) {
-                    ctx_relay = item.attributes["data-relay"] == "Y";
-                    break;
+                    var trigger = item.select(".session-menu");
+                    if (trigger) showCtxMenu(trigger);
+                    return;
                 }
             }
-            updateCtxRelayItem();
-
-            var menuEl = $(#ctx-menu);
-            menuEl.style#left = "80px";
-            menuEl.style#top = "200px";
-            $(#ctx-menu-overlay).style#display = "block";
         }
 
         var _ctxOverflowEls = [];
@@ -1947,6 +1978,7 @@ self.ready = function() {
             }
 
             var bh = el.box(#height);
+            var bw = el.box(#width);
             var root = $(html);
             var sx = el.box(#left, #screen);
             var sy = el.box(#top, #screen);
@@ -1955,9 +1987,24 @@ self.ready = function() {
             var bx = sx - rx;
             var by = sy - ry + bh;
             var menuEl = $(#ctx-menu);
+            $(#ctx-menu-overlay).style#display = "block";
+
+            var mw = menuEl.box(#width);
+            var mh = menuEl.box(#height);
+            if (mw <= 0) mw = 170;
+            if (mh <= 0) mh = 240;
+            var rw = root.box(#width);
+            var rh = root.box(#height);
+
+            bx = bx + bw - mw;
+            if (bx + mw > rw - 6) bx = rw - mw - 6;
+            if (bx < 6) bx = 6;
+            if (by + mh > rh - 6) {
+                by = sy - ry - mh;
+                if (by < 6) by = 6;
+            }
             menuEl.style#left = bx + "px";
             menuEl.style#top = by + "px";
-            $(#ctx-menu-overlay).style#display = "block";
         }
 
         function hideCtxMenu() {

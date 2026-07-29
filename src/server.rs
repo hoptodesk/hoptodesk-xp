@@ -19,8 +19,16 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const CM_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const CM_TIMEOUT: Duration = Duration::from_secs(60);
 
-lazy_static::lazy_static! {
-    static ref CURRENT_CM_SESSION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+thread_local! {
+    static CURRENT_CM_SESSION: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+}
+
+fn set_cm_session(value: Option<String>) {
+    CURRENT_CM_SESSION.with(|s| *s.borrow_mut() = value);
+}
+
+fn get_cm_session() -> Option<String> {
+    CURRENT_CM_SESSION.with(|s| s.borrow().clone())
 }
 
 pub fn run_direct_server(
@@ -627,6 +635,7 @@ pub fn run_session_public(
     peer_info.platform = "Windows".to_string();
     peer_info.version = env!("CARGO_PKG_VERSION").to_string();
     peer_info.sas_enabled = crate::install::is_installed();
+    peer_info.dashboard_linked = !crate::dashboard::get_dashboard_user_id().is_empty();
 
     let displays = capture::enumerate_displays();
 
@@ -700,15 +709,13 @@ pub fn run_session_public(
         new_id
     };
 
-    if let Ok(mut s) = CURRENT_CM_SESSION.lock() {
-        *s = Some(cm_session_id.clone());
-    }
+    set_cm_session(Some(cm_session_id.clone()));
 
     if is_file_transfer {
         crate::config::write_log(&format!("[server] File transfer session"));
 
         let result = run_file_transfer_loop(stream, stop);
-        if let Ok(mut s) = CURRENT_CM_SESSION.lock() { *s = None; }
+        set_cm_session(None);
         cm::signal_cm_ended(&cm_session_id);
         cm::cleanup_cm_files(&cm_session_id);
         rotate_password_if_needed();
@@ -719,7 +726,7 @@ pub fn run_session_public(
         crate::config::write_log(&format!("[server] Terminal session"));
 
         let result = crate::terminal_service::run_terminal_loop(stream, stop);
-        if let Ok(mut s) = CURRENT_CM_SESSION.lock() { *s = None; }
+        set_cm_session(None);
         cm::signal_cm_ended(&cm_session_id);
         cm::cleanup_cm_files(&cm_session_id);
         rotate_password_if_needed();
@@ -730,7 +737,7 @@ pub fn run_session_public(
         let (target_host, target_port) = port_forward_target.clone().unwrap_or_else(|| ("127.0.0.1".to_string(), 3389));
         crate::config::write_log(&format!("[server] Port forward session -> {}:{}", target_host, target_port));
         let result = run_port_forward_loop(stream, &target_host, target_port, stop);
-        if let Ok(mut s) = CURRENT_CM_SESSION.lock() { *s = None; }
+        set_cm_session(None);
         cm::signal_cm_ended(&cm_session_id);
         cm::cleanup_cm_files(&cm_session_id);
         rotate_password_if_needed();
@@ -741,11 +748,11 @@ pub fn run_session_public(
 
     platform::set_prevent_sleep(true);
 
-    let result = run_video_input_loop(stream, &displays, stop, &lr.my_id);
+    let result = run_video_input_loop(stream, &displays, stop, &lr.my_id, lr.option.get_or_default());
 
     platform::set_prevent_sleep(false);
 
-    if let Ok(mut s) = CURRENT_CM_SESSION.lock() { *s = None; }
+    set_cm_session(None);
     cm::signal_cm_ended(&cm_session_id);
     cm::cleanup_cm_files(&cm_session_id);
     rotate_password_if_needed();
@@ -765,12 +772,62 @@ fn rotate_password_if_needed() {
     }
 }
 
+fn video_target_fps(image_quality: message_proto::ImageQuality, custom_fps: u32) -> u64 {
+    if custom_fps > 0 {
+        return custom_fps.clamp(5, 30) as u64;
+    }
+    match image_quality {
+        message_proto::ImageQuality::Low => 10,
+        message_proto::ImageQuality::Best => 25,
+        _ => 20,
+    }
+}
+
+fn apply_video_option(
+    opt: &message_proto::OptionMessage,
+    image_quality: &mut message_proto::ImageQuality,
+    quality_ratio: &mut f32,
+    custom_fps: &mut u32,
+) -> bool {
+    let mut changed = false;
+    if let Ok(q) = opt.image_quality.enum_value() {
+        if q != message_proto::ImageQuality::NotSet {
+            *image_quality = q;
+            *quality_ratio = match q {
+                message_proto::ImageQuality::Low => 0.5,
+                message_proto::ImageQuality::Best => 1.5,
+                _ => 1.0,
+            };
+            changed = true;
+        }
+    }
+    if opt.custom_image_quality > 0 {
+        let ratio = ((opt.custom_image_quality >> 8) & 0xFFF) as f32 * 2.0 / 100.0;
+        *quality_ratio = ratio.clamp(0.1, 2.0);
+        changed = true;
+    }
+    if opt.custom_fps > 0 {
+        *custom_fps = (opt.custom_fps as u32).clamp(5, 30);
+        changed = true;
+    }
+    changed
+}
+
 fn run_video_input_loop(
     stream: &mut FramedStream,
     displays: &[capture::DisplayInfo],
     stop: &Arc<AtomicBool>,
     peer_id: &str,
+    initial_option: &message_proto::OptionMessage,
 ) -> io::Result<()> {
+    struct KeyReleaseGuard;
+    impl Drop for KeyReleaseGuard {
+        fn drop(&mut self) {
+            input::release_all_held_keys();
+        }
+    }
+    let _key_release_guard = KeyReleaseGuard;
+
     if displays.is_empty() {
         return Err(io::Error::new(io::ErrorKind::Other, "No displays found"));
     }
@@ -788,8 +845,19 @@ fn run_video_input_loop(
 
     let mut frame_buf = Vec::new();
     let mut yuv_buf = Vec::new();
-    let target_fps = 10;
-    let frame_interval = Duration::from_millis(1000 / target_fps as u64);
+
+    let base_bitrate_kbps = ((screen_width as u32).saturating_mul(screen_height as u32) / 100).max(200);
+    let mut image_quality = message_proto::ImageQuality::NotSet;
+    let mut quality_ratio: f32 = 1.0;
+    let mut custom_fps: u32 = 0;
+    apply_video_option(initial_option, &mut image_quality, &mut quality_ratio, &mut custom_fps);
+    if (quality_ratio - 1.0).abs() > f32::EPSILON {
+        let kbps = ((base_bitrate_kbps as f32 * quality_ratio) as u32).max(200);
+        if !encoder.set_bitrate(kbps) {
+            crate::config::write_log(&format!("[server] set_bitrate({}) failed, keeping default", kbps));
+        }
+    }
+    let mut frame_interval = Duration::from_millis(1000 / video_target_fps(image_quality, custom_fps));
 
     let display_x = d.x;
     let display_y = d.y;
@@ -821,8 +889,8 @@ fn run_video_input_loop(
 
         if last_cm_check.elapsed() >= Duration::from_millis(500) {
             last_cm_check = Instant::now();
-            if let Ok(s) = CURRENT_CM_SESSION.lock() {
-                if let Some(ref sid) = *s {
+            if let Some(cm_sid) = get_cm_session() {
+                let sid = &cm_sid; {
                     if cm::cm_rejected_path(sid).exists() {
                         crate::config::write_log(&format!("[server] CM user disconnected session"));
 
@@ -891,8 +959,8 @@ fn run_video_input_loop(
                                             Some("already_linked")
                                         } else {
                                             let mut asked = false;
-                                            if let Ok(s) = CURRENT_CM_SESSION.lock() {
-                                                if let Some(ref sid) = *s {
+                                            if let Some(cm_sid) = get_cm_session() {
+                                                let sid = &cm_sid; {
                                                     let _ = std::fs::remove_file(cm::cm_link_response_path(sid));
                                                     asked = std::fs::write(cm::cm_link_request_path(sid), &account_name).is_ok();
                                                 }
@@ -924,6 +992,17 @@ fn run_video_input_loop(
                                 Ok(message_proto::option_message::BoolOption::No) => show_remote_cursor = false,
                                 _ => {}
                             }
+                            if apply_video_option(opt, &mut image_quality, &mut quality_ratio, &mut custom_fps) {
+                                let kbps = ((base_bitrate_kbps as f32 * quality_ratio) as u32).max(200);
+                                if !encoder.set_bitrate(kbps) {
+                                    crate::config::write_log(&format!("[server] set_bitrate({}) failed, keeping previous", kbps));
+                                }
+                                frame_interval = Duration::from_millis(1000 / video_target_fps(image_quality, custom_fps));
+                                crate::config::write_log(&format!(
+                                    "[server] Video options applied: quality_ratio={:.2} kbps={} fps={}",
+                                    quality_ratio, kbps, video_target_fps(image_quality, custom_fps)
+                                ));
+                            }
                         }
                     }
 
@@ -948,8 +1027,8 @@ fn run_video_input_loop(
             }
         }
 
-        if let Ok(s) = CURRENT_CM_SESSION.lock() {
-            if let Some(ref sid) = *s {
+        if let Some(cm_sid) = get_cm_session() {
+            let sid = &cm_sid; {
                 let path = cm::cm_perm_path(sid);
                 if let Ok(text) = std::fs::read_to_string(&path) {
                     let _ = std::fs::remove_file(&path);
@@ -1008,8 +1087,8 @@ fn run_video_input_loop(
         if pending_link.is_some() {
             let response = {
                 let mut found = None;
-                if let Ok(s) = CURRENT_CM_SESSION.lock() {
-                    if let Some(ref sid) = *s {
+                if let Some(cm_sid) = get_cm_session() {
+                    let sid = &cm_sid; {
                         let path = cm::cm_link_response_path(sid);
                         if let Ok(text) = std::fs::read_to_string(&path) {
                             let _ = std::fs::remove_file(&path);
@@ -1046,8 +1125,8 @@ fn run_video_input_loop(
                 let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
             } else if pending_link.as_ref().map_or(false, |(_, started)| started.elapsed() >= Duration::from_secs(120)) {
                 pending_link = None;
-                if let Ok(s) = CURRENT_CM_SESSION.lock() {
-                    if let Some(ref sid) = *s {
+                if let Some(cm_sid) = get_cm_session() {
+                    let sid = &cm_sid; {
                         let _ = std::fs::remove_file(cm::cm_link_request_path(sid));
                         let _ = std::fs::remove_file(cm::cm_link_response_path(sid));
                     }
@@ -1056,8 +1135,8 @@ fn run_video_input_loop(
             }
         }
 
-        if let Ok(s) = CURRENT_CM_SESSION.lock() {
-            if let Some(ref sid) = *s {
+        if let Some(cm_sid) = get_cm_session() {
+            let sid = &cm_sid; {
                 let path = cm::cm_chat_send_path(sid);
                 if let Ok(text) = std::fs::read_to_string(&path) {
                     let _ = std::fs::remove_file(&path);
@@ -1244,6 +1323,8 @@ fn handle_mouse_event(me: &message_proto::MouseEvent, _screen_w: i32, _screen_h:
                 MOUSE_BUTTON_LEFT => input::mouse_down(input::MouseButton::Left),
                 MOUSE_BUTTON_RIGHT => input::mouse_down(input::MouseButton::Right),
                 MOUSE_BUTTON_WHEEL => input::mouse_down(input::MouseButton::Middle),
+                MOUSE_BUTTON_BACK => input::mouse_down(input::MouseButton::Back),
+                MOUSE_BUTTON_FORWARD => input::mouse_down(input::MouseButton::Forward),
                 _ => {}
             }
         }
@@ -1255,15 +1336,20 @@ fn handle_mouse_event(me: &message_proto::MouseEvent, _screen_w: i32, _screen_h:
                 MOUSE_BUTTON_LEFT => input::mouse_up(input::MouseButton::Left),
                 MOUSE_BUTTON_RIGHT => input::mouse_up(input::MouseButton::Right),
                 MOUSE_BUTTON_WHEEL => input::mouse_up(input::MouseButton::Middle),
+                MOUSE_BUTTON_BACK => input::mouse_up(input::MouseButton::Back),
+                MOUSE_BUTTON_FORWARD => input::mouse_up(input::MouseButton::Forward),
                 _ => {}
             }
         }
         MOUSE_TYPE_WHEEL | MOUSE_TYPE_TRACKPAD => {
 
-            let _hscroll = -x;
+            let hscroll = -x;
             let vscroll = y;
             if vscroll != 0 {
                 input::mouse_scroll(vscroll);
+            }
+            if hscroll != 0 {
+                input::mouse_hscroll(hscroll);
             }
         }
         _ => {}
@@ -1396,8 +1482,8 @@ fn handle_misc(misc: &message_proto::Misc) -> Option<message_proto::Message> {
         Some(message_proto::misc::Union::ChatMessage(chat)) => {
             crate::config::write_log(&format!("[server] Chat: {}", chat.text));
 
-            if let Ok(s) = CURRENT_CM_SESSION.lock() {
-                if let Some(ref sid) = *s {
+            if let Some(cm_sid) = get_cm_session() {
+                let sid = &cm_sid; {
                     cm::append_chat_message(sid, "Peer", &chat.text);
                 }
             }
@@ -1515,6 +1601,9 @@ fn control_key_to_vk(ck: protobuf::EnumOrUnknown<message_proto::ControlKey>) -> 
         ControlKey::RAlt => 0xA5,
         ControlKey::Apps => 0x5D,
         ControlKey::RWin => 0x5C,
+        ControlKey::VolumeMute => 0xAD,
+        ControlKey::VolumeDown => 0xAE,
+        ControlKey::VolumeUp => 0xAF,
         ControlKey::LockScreen => {
             platform::lock_screen();
             return None;
@@ -1710,8 +1799,8 @@ fn run_file_transfer_loop(
                         }
                         Some(message_proto::misc::Union::ChatMessage(chat)) => {
                             crate::config::write_log(&format!("[server/ft] Chat: {}", chat.text));
-                            if let Ok(s) = CURRENT_CM_SESSION.lock() {
-                                if let Some(ref sid) = *s {
+                            if let Some(cm_sid) = get_cm_session() {
+                                let sid = &cm_sid; {
                                     cm::append_chat_message(sid, "Peer", &chat.text);
                                 }
                             }

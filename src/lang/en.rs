@@ -401,5 +401,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Proxy Settings", "Proxy Settings"),
         ("Auto Detect", "Auto Detect"),
         ("Type", "Type"),
+        ("Connection not secure", "Connection not secure"),
+        ("A secure connection could not be established. Continue anyway?", "A secure connection could not be established. Continue anyway?"),
     ].iter().cloned().collect();
 }

@@ -40,13 +40,27 @@ pub fn install_exe_path() -> PathBuf {
 }
 
 pub fn is_installed() -> bool {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static LAST: AtomicU8 = AtomicU8::new(2);
+    thread_local! {
+        static CACHE: std::cell::Cell<Option<(std::time::Instant, bool)>> =
+            const { std::cell::Cell::new(None) };
+    }
+    if let Some((t, v)) = CACHE.with(|c| c.get()) {
+        if t.elapsed().as_millis() < 2000 {
+            return v;
+        }
+    }
     let path = install_exe_path();
     let result = path.exists();
-    crate::config::write_log(&format!(
-        "[install] is_installed check: path={} exists={}",
-        path.display(),
-        result
-    ));
+    CACHE.with(|c| c.set(Some((std::time::Instant::now(), result))));
+    if LAST.swap(result as u8, Ordering::Relaxed) != result as u8 {
+        crate::config::write_log(&format!(
+            "[install] is_installed changed: path={} exists={}",
+            path.display(),
+            result
+        ));
+    }
     result
 }
 
@@ -791,6 +805,10 @@ fn run_service_workload(_stop: Arc<AtomicBool>) {
             crate::server::run_direct_server(my_id, password, pk);
         });
     }
+
+    std::thread::spawn(|| {
+        crate::dashboard::start();
+    });
 
     let signal_state = Arc::new(std::sync::Mutex::new(crate::signal::SignalState::default()));
     crate::signal::run_signal_loop(my_id, password, pk, signal_state);

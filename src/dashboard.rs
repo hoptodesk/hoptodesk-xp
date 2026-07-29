@@ -148,6 +148,13 @@ pub fn register_device(
         .as_str()
         .unwrap_or("")
         .to_string();
+    if let Some(account_name) = resp["account_name"].as_str() {
+        if !account_name.is_empty() {
+            let mut cfg2 = Config2::load();
+            cfg2.set_option("dashboard_account_name", account_name);
+            cfg2.save();
+        }
+    }
     config::write_log(&format!(
         "[dashboard] Device registered (user_id={})",
         dashboard_user_id
@@ -217,7 +224,12 @@ fn link_device_inner() -> Result<(), String> {
         &invite_code[..invite_code.len().min(8)]
     ));
 
-    let (enrollment_token, dashboard_user_id, _invite_type, _account_name) = validate_invite(&invite_code)?;
+    let (enrollment_token, dashboard_user_id, _invite_type, account_name) = validate_invite(&invite_code)?;
+    if !account_name.is_empty() {
+        let mut cfg2 = Config2::load();
+        cfg2.set_option("dashboard_account_name", &account_name);
+        cfg2.save();
+    }
 
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();
@@ -480,6 +492,7 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
     let mut last_heartbeat = Instant::now();
     let mut last_ws_data = Instant::now();
     let mut was_in_session = false;
+    let mut prev_cpu_times = crate::platform::get_cpu_times();
 
     loop {
 
@@ -548,11 +561,29 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
             was_in_session = current_in_session;
 
             let wol_now = is_wol_enabled();
+            let cur_cpu_times = crate::platform::get_cpu_times();
+            let cpu_pct = match (prev_cpu_times, cur_cpu_times) {
+                (Some((pi, pk, pu)), Some((ci, ck, cu))) => {
+                    let idle = ci.saturating_sub(pi);
+                    let total = ck.saturating_sub(pk).saturating_add(cu.saturating_sub(pu));
+                    if total > 0 {
+                        ((total.saturating_sub(idle)).saturating_mul(100) / total).min(100) as i64
+                    } else {
+                        0
+                    }
+                }
+                _ => 0,
+            };
+            prev_cpu_times = cur_cpu_times;
             let heartbeat = serde_json::json!({
                 "device_id": device_id,
                 "timezone": timezone,
                 "in_session": current_in_session,
-                "wol_enabled": wol_now
+                "wol_enabled": wol_now,
+                "cpu_pct": cpu_pct,
+                "mem_pct": crate::platform::get_mem_pct(),
+                "disk_pct": crate::platform::get_disk_pct(),
+                "battery_pct": -1
             });
             send_socketio_event(&mut ws, "heartbeat", &heartbeat)?;
             last_heartbeat = Instant::now();

@@ -27,6 +27,48 @@ fn make_tls_config() -> Arc<ClientConfig> {
 
 lazy_static::lazy_static! {
     static ref TLS_CONFIG: Arc<ClientConfig> = make_tls_config();
+    static ref DNS_CACHE: std::sync::Mutex<std::collections::HashMap<String, (Vec<std::net::SocketAddr>, std::time::Instant)>> =
+        std::sync::Mutex::new(std::collections::HashMap::new());
+}
+
+const DNS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+fn resolve_with_cache(host: &str, port: u16) -> Result<Vec<std::net::SocketAddr>, String> {
+    use std::net::ToSocketAddrs;
+    let key = format!("{}:{}", host, port);
+    if let Ok(cache) = DNS_CACHE.lock() {
+        if let Some((addrs, at)) = cache.get(&key) {
+            if at.elapsed() < DNS_CACHE_TTL && !addrs.is_empty() {
+                return Ok(addrs.clone());
+            }
+        }
+    }
+    match (host, port).to_socket_addrs() {
+        Ok(iter) => {
+            let addrs: Vec<std::net::SocketAddr> = iter.collect();
+            if addrs.is_empty() {
+                return Err("DNS resolve: no addresses".to_string());
+            }
+            if let Ok(mut cache) = DNS_CACHE.lock() {
+                cache.insert(key, (addrs.clone(), std::time::Instant::now()));
+            }
+            Ok(addrs)
+        }
+        Err(e) => {
+            if let Ok(cache) = DNS_CACHE.lock() {
+                if let Some((addrs, _)) = cache.get(&key) {
+                    if !addrs.is_empty() {
+                        crate::config::write_log(&format!(
+                            "[dns] Resolve failed ({}), using stale cache for {}",
+                            e, key
+                        ));
+                        return Ok(addrs.clone());
+                    }
+                }
+            }
+            Err(format!("DNS resolve failed: {}", e))
+        }
+    }
 }
 
 pub struct ProxySettings {
@@ -105,18 +147,22 @@ pub fn connect_tcp_timeout(target_host: &str, target_port: u16, timeout: std::ti
         Ok(tcp)
     } else {
 
-        let addr: std::net::SocketAddr = format!("{}:{}", target_host, target_port)
-            .parse()
-            .or_else(|_| {
-                use std::net::ToSocketAddrs;
-                (target_host, target_port)
-                    .to_socket_addrs()
-                    .map_err(|e| format!("DNS resolve failed: {}", e))?
-                    .next()
-                    .ok_or_else(|| "DNS resolve: no addresses".to_string())
-            })?;
-        TcpStream::connect_timeout(&addr, timeout)
-            .map_err(|e| format!("TCP connect failed: {}", e))
+        if let Ok(addr) = format!("{}:{}", target_host, target_port).parse::<std::net::SocketAddr>() {
+            return TcpStream::connect_timeout(&addr, timeout)
+                .map_err(|e| format!("TCP connect failed: {}", e));
+        }
+        let addrs = resolve_with_cache(target_host, target_port)?;
+        let mut last_err = String::new();
+        for addr in &addrs {
+            match TcpStream::connect_timeout(addr, timeout) {
+                Ok(tcp) => return Ok(tcp),
+                Err(e) => {
+                    last_err = format!("TCP connect to {} failed: {}", addr, e);
+                    crate::config::write_log(&format!("[tcp] {}", last_err));
+                }
+            }
+        }
+        Err(last_err)
     }
 }
 

@@ -794,7 +794,7 @@ unsafe extern "system" fn remote_timer_callback(
         if VIDEO_HWND.is_null() && !IS_FILE_TRANSFER_MODE {
             let mut rect = [0i32; 4];
             GetClientRect(hwnd as *mut std::ffi::c_void, &mut rect);
-            let header_h = 33;
+            let header_h = 40;
             let gwl_style = -16i32;
             let style = GetWindowLongA(hwnd as *mut std::ffi::c_void, gwl_style);
             SetWindowLongA(hwnd as *mut std::ffi::c_void, gwl_style, style | 0x02000000);
@@ -1482,7 +1482,7 @@ unsafe fn render_frame_gdi(hwnd: sciter::types::HWINDOW, bgra: &[u8], width: i32
 
     let mut parent_rect = [0i32; 4];
     GetClientRect(hwnd as *mut std::ffi::c_void, &mut parent_rect);
-    let header_h = 33;
+    let header_h = 40;
     let client_w = parent_rect[2];
     let client_h = parent_rect[3] - header_h;
     if client_w <= 0 || client_h <= 0 { return; }

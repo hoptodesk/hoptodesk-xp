@@ -10,6 +10,49 @@ use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+lazy_static::lazy_static! {
+    static ref INSECURE_CONSENTED: Mutex<std::collections::HashSet<String>> =
+        Mutex::new(std::collections::HashSet::new());
+}
+
+fn insecure_already_consented(peer_id: &str) -> bool {
+    if crate::config::PeerConfig::load(peer_id).get_option("allow-insecure") == "Y" {
+        return true;
+    }
+    INSECURE_CONSENTED
+        .lock()
+        .map(|s| s.contains(peer_id))
+        .unwrap_or(false)
+}
+
+fn remember_insecure_consent(peer_id: &str) {
+    if let Ok(mut s) = INSECURE_CONSENTED.lock() {
+        s.insert(peer_id.to_string());
+    }
+}
+
+fn prompt_insecure_consent(client_state: &Arc<Mutex<ClientState>>, target_id: &str) -> bool {
+    if insecure_already_consented(target_id) {
+        return true;
+    }
+    if let Ok(mut state) = client_state.lock() {
+        state.status = "insecure_prompt".into();
+    }
+    let proceed = crate::win_confirm_warn(
+        &crate::lang::translate(
+            "A secure connection could not be established. Continue anyway?".to_string(),
+        ),
+        &crate::lang::translate("Connection not secure".to_string()),
+    );
+    if let Ok(mut state) = client_state.lock() {
+        state.status = "login".into();
+    }
+    if proceed {
+        remember_insecure_consent(target_id);
+    }
+    proceed
+}
+
 pub struct ClientState {
     pub status: String,
     pub error: String,
@@ -219,6 +262,7 @@ fn run_client_inner(
     let data = stream.recv_msg()?;
     let msg = message_proto::Message::parse_from_bytes(&data).map_err(io_err)?;
 
+    let mut secured = false;
     let hash = match msg.union {
         Some(message_proto::message::Union::Hash(h)) => h,
         Some(message_proto::message::Union::SignedId(signed_id)) => {
@@ -261,9 +305,9 @@ fn run_client_inner(
                 stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
 
                 stream.set_key(sym_key);
+                secured = true;
                 crate::config::write_log("[client] Encryption established");
             } else {
-
                 crate::config::write_log("[client] No server pk, sending empty PublicKey (no encryption)");
                 let pk = message_proto::PublicKey::new();
                 let mut msg = message_proto::Message::new();
@@ -292,6 +336,13 @@ fn run_client_inner(
     };
 
     crate::config::write_log(&format!("[client] Got Hash challenge, authenticating..."));
+
+    if !secured && !prompt_insecure_consent(client_state, target_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "Insecure connection cancelled",
+        ));
+    }
 
     let switch_uuid = unsafe { crate::remote::SWITCH_UUID.take() };
     if let Some(ref uuid_str) = switch_uuid {
@@ -1190,6 +1241,9 @@ fn vk_to_control_key(vk: u32) -> Option<message_proto::ControlKey> {
         0x7B => Some(ControlKey::F12),
         0x90 => Some(ControlKey::NumLock),
         0x91 => Some(ControlKey::Scroll),
+        0xAD => Some(ControlKey::VolumeMute),
+        0xAE => Some(ControlKey::VolumeDown),
+        0xAF => Some(ControlKey::VolumeUp),
         _ => None,
     }
 }

@@ -140,6 +140,7 @@ message PeerInfo {
   // NOTE: Only support one-level dictionaries (for peer to update), and the key is of type string.
   string platform_additions = 12;
   WindowsSessions windows_sessions = 13;
+  bool dashboard_linked = 14;
 }
 
 message WindowsSession {  
@@ -385,6 +386,7 @@ message FileDirectory {
   int32 id = 1;
   string path = 2;
   repeated FileEntry entries = 3;
+  bool is_bundle = 4;
 }
 
 message ReadDir {
@@ -504,6 +506,7 @@ message FileTransferReceiveRequest {
   repeated FileEntry files = 3;
   int32 file_num = 4;
   uint64 total_size = 5;
+  bool is_bundle = 6;
 }
 
 message FileRemoveDir {

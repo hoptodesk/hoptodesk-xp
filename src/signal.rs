@@ -44,6 +44,82 @@ pub fn api_get() -> Result<String, String> {
         }
     }
 }
+static FORCE_API_REFRESH: AtomicBool = AtomicBool::new(false);
+const API_CACHE_MAX_AGE_SECS: u64 = 6 * 3600;
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn load_api_cache() -> Option<(String, u64)> {
+    let cfg = crate::config::Config2::load();
+    let b64 = cfg.get_option("api-cache");
+    if b64.is_empty() {
+        return None;
+    }
+    let bytes = crate::config::base64_decode(&b64)?;
+    let body = String::from_utf8(bytes).ok()?;
+    let time: u64 = cfg.get_option("api-cache-time").parse().unwrap_or(0);
+    Some((body, time))
+}
+
+fn store_api_cache(body: &str) {
+    let mut cfg = crate::config::Config2::load();
+    cfg.set_option("api-cache", &crate::config::base64_encode(body.as_bytes()));
+    cfg.set_option("api-cache-time", &now_unix().to_string());
+    cfg.save();
+}
+
+fn api_body_is_valid(body: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|j| {
+            j.get("rendezvous")
+                .and_then(|r| r.get("host"))
+                .and_then(|h| h.as_str())
+                .map(|h| !h.is_empty())
+        })
+        .unwrap_or(false)
+}
+
+pub fn api_get_cached(force_refresh: bool) -> Result<String, String> {
+    let custom = crate::config::Config2::load().get_option("custom-rendezvous-server");
+    if !custom.is_empty() {
+        return api_get();
+    }
+    let cached = load_api_cache();
+    if !force_refresh {
+        if let Some((ref body, time)) = cached {
+            let now = now_unix();
+            if time > 0 && time <= now && now - time < API_CACHE_MAX_AGE_SECS {
+                return Ok(body.clone());
+            }
+        }
+    }
+    let fetched = api_get();
+    if let Ok(ref body) = fetched {
+        if api_body_is_valid(body) {
+            store_api_cache(body);
+            return Ok(body.clone());
+        }
+    }
+    let reason = match &fetched {
+        Ok(_) => "invalid API response".to_string(),
+        Err(e) => e.clone(),
+    };
+    if let Some((body, _)) = cached {
+        crate::config::write_log(&format!(
+            "[api] Fetch unusable ({}), using cached response",
+            reason
+        ));
+        return Ok(body);
+    }
+    fetched
+}
+
 const HEALTHCHECK: &str = r#"{"protocol":"one-to-self","data":"healthcheck"}"#;
 const HEALTHCHECK_TIMEOUT: u64 = 90;
 const SERVER_TIMEOUT: u64 = 30;
@@ -98,7 +174,7 @@ pub struct SignalMessage {
 
 fn discover_signal_server() -> Result<(String, u16), String> {
     crate::config::write_log("[signal] Discovering signal server...");
-    match api_get() {
+    match api_get_cached(FORCE_API_REFRESH.swap(false, Ordering::SeqCst)) {
         Ok(body) => {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                 if let Some(obj) = json.get("rendezvous").and_then(|v| v.as_object()) {
@@ -122,22 +198,53 @@ fn discover_signal_server() -> Result<(String, u16), String> {
     }
 }
 
+fn log_truncate(msg: &str) -> &str {
+    match msg.char_indices().nth(200) {
+        Some((i, _)) => &msg[..i],
+        None => msg,
+    }
+}
+
 pub fn run_signal_loop(
     my_id: String,
     password: String,
     pk: Vec<u8>,
     signal_state: Arc<Mutex<SignalState>>,
 ) {
+    run_signal_loop_ex(my_id, password, pk, signal_state, false)
+}
+
+pub fn run_signal_loop_ex(
+    my_id: String,
+    password: String,
+    pk: Vec<u8>,
+    signal_state: Arc<Mutex<SignalState>>,
+    yield_to_service: bool,
+) {
     loop {
+        if yield_to_service && crate::install::is_installed() {
+            let st = crate::cm::read_service_status().unwrap_or_else(|| "offline".into());
+            if let Ok(mut state) = signal_state.lock() {
+                if state.status != st {
+                    state.status = st;
+                    state.error.clear();
+                }
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
         let cycle_start = Instant::now();
 
         if let Ok(mut state) = signal_state.lock() {
             state.status = "connecting".to_string();
             state.error.clear();
         }
-        crate::cm::write_service_status("connecting");
+        if !yield_to_service {
+            crate::cm::write_service_status("connecting");
+        }
 
-        match run_signal_once(&my_id, &password, &pk, &signal_state) {
+        match run_signal_once(&my_id, &password, &pk, &signal_state, yield_to_service) {
             Ok(()) => {
 
             }
@@ -146,7 +253,9 @@ pub fn run_signal_loop(
                     state.status = "offline".to_string();
                     state.error = e.clone();
                 }
-                crate::cm::write_service_status("offline");
+                if !yield_to_service {
+                    crate::cm::write_service_status("offline");
+                }
                 crate::config::write_log(&format!("[signal] Error: {}", e));
             }
         }
@@ -164,6 +273,7 @@ fn run_signal_once(
     password: &str,
     pk: &[u8],
     signal_state: &Arc<Mutex<SignalState>>,
+    yield_to_service: bool,
 ) -> Result<(), String> {
 
     crate::config::write_log(&format!("[signal] Fetching API..."));
@@ -175,8 +285,13 @@ fn run_signal_once(
         "[signal] Connecting WebSocket to {}:{}{}...",
         host, port, path
     ));
-    let mut ws = WsClient::connect(&host, port, &path)
-        .map_err(|e| format!("WebSocket connect failed: {}", e))?;
+    let mut ws = match WsClient::connect(&host, port, &path) {
+        Ok(ws) => ws,
+        Err(e) => {
+            FORCE_API_REFRESH.store(true, Ordering::SeqCst);
+            return Err(format!("WebSocket connect failed: {}", e));
+        }
+    };
 
     if let Ok(mut state) = signal_state.lock() {
         state.status = "online".to_string();
@@ -184,7 +299,9 @@ fn run_signal_once(
         state.ws_port = port;
         state.error.clear();
     }
-    crate::cm::write_service_status("online");
+    if !yield_to_service {
+        crate::cm::write_service_status("online");
+    }
     crate::config::write_log(&format!("[signal] Connected and online"));
 
     ws.set_read_timeout(Some(Duration::from_secs(5)))
@@ -201,7 +318,7 @@ fn run_signal_once(
                 healthcheck_sent = None;
 
                 if msg != HEALTHCHECK {
-                    crate::config::write_log(&format!("[signal] Recv: {}", &msg[..msg.len().min(200)]));
+                    crate::config::write_log(&format!("[signal] Recv: {}", log_truncate(&msg)));
                 }
 
                 if msg == HEALTHCHECK {
@@ -232,7 +349,9 @@ fn run_signal_once(
                 if e.kind() == std::io::ErrorKind::WouldBlock
                     || e.kind() == std::io::ErrorKind::TimedOut
                 {
-
+                    if yield_to_service && crate::install::is_installed() {
+                        return Err("service installed, handing the connection to it".into());
+                    }
                 } else {
 
                     return Err(format!("WebSocket recv error: {}", e));
@@ -425,7 +544,7 @@ fn handle_relay_connection(
     let got_ready = loop {
         match ws.recv_text() {
             Ok(msg) => {
-                crate::config::write_log(&format!("[relay] WS recv while waiting for RelayReady: {}", &msg[..msg.len().min(200)]));
+                crate::config::write_log(&format!("[relay] WS recv while waiting for RelayReady: {}", log_truncate(&msg)));
 
                 if let Ok(sm) = serde_json::from_str::<SignalMessage>(&msg) {
                     if sm.protocol == "one-to-one" && sm.addr.is_empty() && sm.pk.is_empty() && sm.sender_id.is_empty() {

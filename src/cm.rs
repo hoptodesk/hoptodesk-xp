@@ -256,7 +256,7 @@ fn read_peer_info(session_id: &str) -> (String, String, String) {
     (take("peer_id"), take("peer_name"), take("peer_platform"))
 }
 
-fn html_escape(s: &str) -> String {
+pub fn html_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

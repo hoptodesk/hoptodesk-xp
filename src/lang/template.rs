@@ -881,6 +881,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("via", ""),
         ("Device", ""),
         ("WoL must be enabled in the device's BIOS/UEFI settings", ""),
+        ("Connection not secure", ""),
+        ("A secure connection could not be established. Continue anyway?", ""),
 
     ].iter().cloned().collect();
 }

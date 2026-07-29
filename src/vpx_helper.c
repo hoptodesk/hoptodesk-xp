@@ -11,6 +11,7 @@
 typedef struct {
     vpx_codec_ctx_t codec;
     vpx_image_t img;
+    vpx_codec_enc_cfg_t cfg;
     int width;
     int height;
     int64_t frame_count;
@@ -55,11 +56,18 @@ vpx_encoder_t* vpx_helper_create(int width, int height, int *err_code) {
 
     vpx_codec_control(&enc->codec, VP8E_SET_CPUUSED, 8);
 
+    enc->cfg = cfg;
     enc->width = width;
     enc->height = height;
     enc->frame_count = 0;
     *err_code = 0;
     return enc;
+}
+
+int vpx_helper_set_bitrate(vpx_encoder_t *enc, int bitrate_kbps) {
+    if (!enc || bitrate_kbps <= 0) return -1;
+    enc->cfg.rc_target_bitrate = bitrate_kbps;
+    return (int)vpx_codec_enc_config_set(&enc->codec, &enc->cfg);
 }
 
 // Encode one I420 frame. Returns number of output packets, or negative on error.

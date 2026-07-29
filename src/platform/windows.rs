@@ -384,6 +384,81 @@ pub fn set_clipboard_text(text: &str) -> bool {
     }
 }
 
+fn build_cf_html(fragment: &str) -> Vec<u8> {
+    let pre = "<html>\r\n<body>\r\n<!--StartFragment-->";
+    let post = "<!--EndFragment-->\r\n</body>\r\n</html>";
+    let header_len = format!(
+        "Version:0.9\r\nStartHTML:{:010}\r\nEndHTML:{:010}\r\nStartFragment:{:010}\r\nEndFragment:{:010}\r\n",
+        0, 0, 0, 0
+    )
+    .len();
+    let start_html = header_len;
+    let start_fragment = start_html + pre.len();
+    let end_fragment = start_fragment + fragment.len();
+    let end_html = end_fragment + post.len();
+    let header = format!(
+        "Version:0.9\r\nStartHTML:{:010}\r\nEndHTML:{:010}\r\nStartFragment:{:010}\r\nEndFragment:{:010}\r\n",
+        start_html, end_html, start_fragment, end_fragment
+    );
+    let mut out = Vec::with_capacity(end_html + 1);
+    out.extend_from_slice(header.as_bytes());
+    out.extend_from_slice(pre.as_bytes());
+    out.extend_from_slice(fragment.as_bytes());
+    out.extend_from_slice(post.as_bytes());
+    out.push(0);
+    out
+}
+
+pub fn set_clipboard_text_and_html(text: &str, html: Option<&str>) -> bool {
+    use winapi::um::winbase::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    use winapi::um::winuser::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+        CF_UNICODETEXT,
+    };
+
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == FALSE {
+            return false;
+        }
+        EmptyClipboard();
+
+        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let text_size = wide.len() * 2;
+        let htext = GlobalAlloc(GMEM_MOVEABLE, text_size);
+        if !htext.is_null() {
+            let ptr = GlobalLock(htext) as *mut u16;
+            if !ptr.is_null() {
+                std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
+                GlobalUnlock(htext);
+                SetClipboardData(CF_UNICODETEXT, htext);
+            }
+        }
+
+        if let Some(html) = html {
+            let fmt_name: Vec<u16> = "HTML Format"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let cf_html = RegisterClipboardFormatW(fmt_name.as_ptr());
+            if cf_html != 0 {
+                let bytes = build_cf_html(html);
+                let hhtml = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
+                if !hhtml.is_null() {
+                    let ptr = GlobalLock(hhtml) as *mut u8;
+                    if !ptr.is_null() {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+                        GlobalUnlock(hhtml);
+                        SetClipboardData(cf_html, hhtml);
+                    }
+                }
+            }
+        }
+
+        CloseClipboard();
+        true
+    }
+}
+
 pub fn get_clipboard_file_paths() -> Option<Vec<String>> {
     use winapi::um::winuser::{
         CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
@@ -798,4 +873,94 @@ pub fn is_installed() -> bool {
 
 extern "system" {
     fn CloseHandle(hObject: *mut std::ffi::c_void) -> BOOL;
+}
+
+#[repr(C)]
+struct FileTimeU64 {
+    lo: u32,
+    hi: u32,
+}
+
+fn filetime_to_u64(t: &FileTimeU64) -> u64 {
+    ((t.hi as u64) << 32) | t.lo as u64
+}
+
+pub fn get_cpu_times() -> Option<(u64, u64, u64)> {
+    extern "system" {
+        fn GetSystemTimes(
+            lpIdleTime: *mut FileTimeU64,
+            lpKernelTime: *mut FileTimeU64,
+            lpUserTime: *mut FileTimeU64,
+        ) -> BOOL;
+    }
+    let mut idle = FileTimeU64 { lo: 0, hi: 0 };
+    let mut kernel = FileTimeU64 { lo: 0, hi: 0 };
+    let mut user = FileTimeU64 { lo: 0, hi: 0 };
+    let ok = unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) };
+    if ok == FALSE {
+        return None;
+    }
+    Some((
+        filetime_to_u64(&idle),
+        filetime_to_u64(&kernel),
+        filetime_to_u64(&user),
+    ))
+}
+
+pub fn get_mem_pct() -> i64 {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        dw_length: u32,
+        dw_memory_load: u32,
+        ull_total_phys: u64,
+        ull_avail_phys: u64,
+        ull_total_page_file: u64,
+        ull_avail_page_file: u64,
+        ull_total_virtual: u64,
+        ull_avail_virtual: u64,
+        ull_avail_extended_virtual: u64,
+    }
+    extern "system" {
+        fn GlobalMemoryStatusEx(lpBuffer: *mut MemoryStatusEx) -> BOOL;
+    }
+    let mut ms = MemoryStatusEx {
+        dw_length: std::mem::size_of::<MemoryStatusEx>() as u32,
+        dw_memory_load: 0,
+        ull_total_phys: 0,
+        ull_avail_phys: 0,
+        ull_total_page_file: 0,
+        ull_avail_page_file: 0,
+        ull_total_virtual: 0,
+        ull_avail_virtual: 0,
+        ull_avail_extended_virtual: 0,
+    };
+    let ok = unsafe { GlobalMemoryStatusEx(&mut ms) };
+    if ok == FALSE {
+        return 0;
+    }
+    (ms.dw_memory_load as i64).clamp(0, 100)
+}
+
+pub fn get_disk_pct() -> i64 {
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lpDirectoryName: *const u16,
+            lpFreeBytesAvailableToCaller: *mut u64,
+            lpTotalNumberOfBytes: *mut u64,
+            lpTotalNumberOfFreeBytes: *mut u64,
+        ) -> BOOL;
+    }
+    let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    let path: Vec<u16> = format!("{}\\", drive)
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut avail: u64 = 0;
+    let mut total: u64 = 0;
+    let mut free: u64 = 0;
+    let ok = unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut avail, &mut total, &mut free) };
+    if ok == FALSE || total == 0 {
+        return 0;
+    }
+    ((total.saturating_sub(free)).saturating_mul(100) / total).min(100) as i64
 }

@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "hoptodesk"
-version = "1.46.1"
+version = "1.46.9"
 dependencies = [
  "bytes",
  "cc",
@@ -183,7 +183,7 @@ dependencies = [
  "qrcode",
  "ring",
  "rustls",
- "sciter-rs",
+ "wireui-xp",
  "serde",
  "serde_json",
  "webpki-roots 0.26.11",
@@ -507,7 +507,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sciter-rs"
+name = "wireui-xp"
 version = "0.5.57"
 dependencies = [
  "lazy_static",

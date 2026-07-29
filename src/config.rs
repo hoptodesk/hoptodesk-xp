@@ -166,24 +166,32 @@ impl Config {
         };
         cfg.read();
 
+        let mut generated = false;
         if cfg.id.is_empty() {
             cfg.id = generate_id();
+            generated = true;
         }
         if cfg.password.is_empty() {
             cfg.password = generate_password();
+            generated = true;
         }
         if cfg.salt.is_empty() {
             cfg.salt = generate_random_string(6);
+            generated = true;
         }
         if cfg.encryption_key.is_empty() {
             cfg.encryption_key = generate_random_string(32);
+            generated = true;
         }
         if cfg.key_pair.0.len() != 64 || cfg.key_pair.1.len() != 32
             || cfg.key_pair.0[32..] != cfg.key_pair.1[..] {
             cfg.key_pair = generate_key_pair();
+            generated = true;
         }
 
-        cfg.save();
+        if generated {
+            cfg.save();
+        }
         cfg
     }
 
@@ -210,15 +218,22 @@ impl Config {
 
     pub fn save(&self) {
         let mut content = format!(
-            "id = \"{}\"\npassword = \"{}\"\nsalt = \"{}\"\nkey_confirmed = {}\nkey_pair_sk = \"{}\"\nkey_pair_pk = \"{}\"\n",
-            self.id, self.password, self.salt, self.key_confirmed,
-            hex_encode(&self.key_pair.0), hex_encode(&self.key_pair.1)
+            "id = {}\npassword = {}\nsalt = {}\nkey_confirmed = {}\nkey_pair_sk = {}\nkey_pair_pk = {}\n",
+            toml_encode_str(&self.id),
+            toml_encode_str(&self.password),
+            toml_encode_str(&self.salt),
+            self.key_confirmed,
+            toml_encode_str(&hex_encode(&self.key_pair.0)),
+            toml_encode_str(&hex_encode(&self.key_pair.1))
         );
         if !self.permanent_password.is_empty() {
-            content.push_str(&format!("permanent_password = \"{}\"\n", self.permanent_password));
+            content.push_str(&format!("permanent_password = {}\n", toml_encode_str(&self.permanent_password)));
         }
         if !self.encryption_key.is_empty() {
-            content.push_str(&format!("encryption_key = \"{}\"\n", self.encryption_key));
+            content.push_str(&format!("encryption_key = {}\n", toml_encode_str(&self.encryption_key)));
+        }
+        if let Some(parent) = self.path.parent() {
+            let _ = std::fs::create_dir_all(parent);
         }
         if let Err(e) = std::fs::write(&self.path, &content) {
             write_log(&format!("[config] Failed to save {}: {}", self.path.display(), e));
@@ -276,10 +291,7 @@ impl Config2 {
     pub fn save(&self) {
         let mut content = String::new();
         if !self.rendezvous_server.is_empty() {
-            content.push_str(&format!(
-                "rendezvous_server = \"{}\"\n",
-                self.rendezvous_server
-            ));
+            content.push_str(&format!("rendezvous_server = {}\n", toml_encode_str(&self.rendezvous_server)));
         }
         content.push_str(&format!("nat_type = {}\n", self.nat_type));
         content.push_str(&format!("serial = {}\n", self.serial));
@@ -290,11 +302,14 @@ impl Config2 {
             keys.sort();
             for key in keys {
                 if let Some(val) = self.options.get(key) {
-                    content.push_str(&format!("{} = \"{}\"\n", key, val));
+                    content.push_str(&format!("{} = {}\n", key, toml_encode_str(val)));
                 }
             }
         }
 
+        if let Some(parent) = self.path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         if let Err(e) = std::fs::write(&self.path, &content) {
             write_log(&format!("[config2] Failed to save {}: {}", self.path.display(), e));
         }
@@ -386,7 +401,8 @@ impl LocalConfig {
 
                                 let trimmed = val.trim_start_matches('[').trim_end_matches(']');
                                 for item in trimmed.split(',') {
-                                    let item = item.trim().trim_matches('"');
+                                    let item_dec = toml_decode_str(item.trim());
+                                    let item = item_dec.as_str();
                                     if !item.is_empty() {
                                         self.fav.push(item.to_string());
                                     }
@@ -403,7 +419,7 @@ impl LocalConfig {
     pub fn save(&self) {
         let mut content = String::new();
         if !self.remote_id.is_empty() {
-            content.push_str(&format!("remote_id = \"{}\"\n", self.remote_id));
+            content.push_str(&format!("remote_id = {}\n", toml_encode_str(&self.remote_id)));
         }
         if self.size != (0, 0, 0, 0) {
             content.push_str(&format!(
@@ -416,7 +432,7 @@ impl LocalConfig {
                 "fav = [{}]\n",
                 self.fav
                     .iter()
-                    .map(|f| format!("\"{}\"", f))
+                    .map(|f| toml_encode_str(f))
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
@@ -425,10 +441,8 @@ impl LocalConfig {
         if !self.recent_peers.is_empty() {
             content.push_str("\n[recent]\n");
             for (i, p) in self.recent_peers.iter().enumerate() {
-                content.push_str(&format!(
-                    "peer{} = \"{}|{}|{}|{}\"\n",
-                    i, p.id, p.username, p.hostname, p.platform
-                ));
+                let joined = format!("{}|{}|{}|{}", p.id, p.username, p.hostname, p.platform);
+                content.push_str(&format!("peer{} = {}\n", i, toml_encode_str(&joined)));
             }
         }
 
@@ -438,11 +452,14 @@ impl LocalConfig {
             keys.sort();
             for key in keys {
                 if let Some(val) = self.options.get(key) {
-                    content.push_str(&format!("{} = \"{}\"\n", key, val));
+                    content.push_str(&format!("{} = {}\n", key, toml_encode_str(val)));
                 }
             }
         }
 
+        if let Some(parent) = self.path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         if let Err(e) = std::fs::write(&self.path, &content) {
             write_log(&format!("[local] Failed to save {}: {}", self.path.display(), e));
         }
@@ -548,15 +565,15 @@ impl PeerConfig {
         let path = dir.join(format!("{}.toml", id));
         let mut content = String::new();
         if !self.alias.is_empty() {
-            content.push_str(&format!("alias = \"{}\"\n", self.alias));
+            content.push_str(&format!("alias = {}\n", toml_encode_str(&self.alias)));
         }
         for (k, v) in &self.options {
             if k == "password" {
 
                 let encrypted = encrypt_password(v);
-                content.push_str(&format!("{} = \"{}\"\n", k, encrypted));
+                content.push_str(&format!("{} = {}\n", k, toml_encode_str(&encrypted)));
             } else {
-                content.push_str(&format!("{} = \"{}\"\n", k, v));
+                content.push_str(&format!("{} = {}\n", k, toml_encode_str(v)));
             }
         }
         let _ = std::fs::write(&path, &content);
@@ -587,13 +604,74 @@ fn parse_toml_line(line: &str) -> Option<(&str, String)> {
     let eq_pos = line.find('=')?;
     let key = line[..eq_pos].trim();
     let val = line[eq_pos + 1..].trim();
+    Some((key, toml_decode_str(val)))
+}
 
-    let val = if val.starts_with('"') && val.ends_with('"') && val.len() >= 2 {
+pub fn toml_encode_str(val: &str) -> String {
+    let needs_basic = val
+        .chars()
+        .any(|c| c == '\'' || c == '\n' || c == '\r' || c.is_control());
+    if !needs_basic {
+        format!("'{}'", val)
+    } else {
+        let mut out = String::with_capacity(val.len() + 2);
+        out.push('"');
+        for c in val.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    }
+}
+
+fn toml_decode_str(val: &str) -> String {
+    let val = val.trim();
+    let bytes = val.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\'' {
         val[1..val.len() - 1].to_string()
+    } else if bytes.len() >= 2 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"' {
+        unescape_basic(&val[1..val.len() - 1])
     } else {
         val.to_string()
-    };
-    Some((key, val))
+    }
+}
+
+fn unescape_basic(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('u') => {
+                let hex: String = chars.by_ref().take(4).collect();
+                if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    out.push(ch);
+                }
+            }
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 fn generate_id() -> String {
@@ -699,7 +777,6 @@ pub fn migrate_old_config() {
         "HopToDesk.toml",
         "HopToDesk2.toml",
         "HopToDesk_local.toml",
-        "TeamID.toml",
     ];
     for filename in config_files {
         let old = app.join(filename);
@@ -885,7 +962,7 @@ fn base64_decode_byte(c: u8) -> Option<u8> {
     }
 }
 
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
+pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let bytes = s.as_bytes();
     if bytes.is_empty() { return Some(Vec::new()); }
     let mut result = Vec::new();

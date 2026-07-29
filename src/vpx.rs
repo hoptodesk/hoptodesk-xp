@@ -14,6 +14,7 @@ extern "C" {
         out_pts: *mut i64,
         max_out: i32,
     ) -> i32;
+    fn vpx_helper_set_bitrate(enc: *mut c_void, bitrate_kbps: i32) -> i32;
     fn vpx_helper_destroy(enc: *mut c_void);
 
     fn vpx_helper_dec_create(err_code: *mut i32) -> *mut c_void;
@@ -44,6 +45,10 @@ impl Vp8Encoder {
             }
             Ok(Vp8Encoder { handle, width, height })
         }
+    }
+
+    pub fn set_bitrate(&mut self, kbps: u32) -> bool {
+        unsafe { vpx_helper_set_bitrate(self.handle, kbps as i32) == 0 }
     }
 
     pub fn encode(&mut self, yuv_data: &mut [u8], force_keyframe: bool) -> Result<Vec<EncodedFrame>, String> {

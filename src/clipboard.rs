@@ -48,6 +48,18 @@ fn extract_text_from_multi(mc: &message_proto::MultiClipboards) -> Option<String
     mc.clipboards.first().and_then(extract_text_from_clipboard)
 }
 
+fn extract_html_from_multi(mc: &message_proto::MultiClipboards) -> Option<String> {
+    for cb in &mc.clipboards {
+        if cb.format.enum_value_or_default() == message_proto::ClipboardFormat::Html {
+            let html = extract_text_from_clipboard(cb)?;
+            if !html.is_empty() {
+                return Some(html);
+            }
+        }
+    }
+    None
+}
+
 pub fn handle_clipboard_message(cb: &message_proto::Clipboard) {
     if let Some(text) = extract_text_from_clipboard(cb) {
         if !text.is_empty() {
@@ -59,7 +71,8 @@ pub fn handle_clipboard_message(cb: &message_proto::Clipboard) {
 pub fn handle_multi_clipboards_message(mc: &message_proto::MultiClipboards) {
     if let Some(text) = extract_text_from_multi(mc) {
         if !text.is_empty() {
-            platform::set_clipboard_text(&text);
+            let html = extract_html_from_multi(mc);
+            platform::set_clipboard_text_and_html(&text, html.as_deref());
         }
     }
 }

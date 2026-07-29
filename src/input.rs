@@ -8,6 +8,50 @@ use winapi::um::winuser::{
 };
 
 const KEYEVENTF_UNICODE: u32 = 0x0004;
+const MOUSEEVENTF_XDOWN: u32 = 0x0080;
+const MOUSEEVENTF_XUP: u32 = 0x0100;
+const MOUSEEVENTF_HWHEEL: u32 = 0x01000;
+const XBUTTON1: i32 = 0x0001;
+const XBUTTON2: i32 = 0x0002;
+
+thread_local! {
+    static HELD_VKS: std::cell::RefCell<std::collections::HashSet<u16>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+    static HELD_SCANCODES: std::cell::RefCell<std::collections::HashSet<u16>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+pub fn release_all_held_keys() {
+    let vks: Vec<u16> = HELD_VKS.with(|h| h.borrow().iter().copied().collect());
+    for vk in vks {
+        let mut input: INPUT = unsafe { std::mem::zeroed() };
+        input.type_ = INPUT_KEYBOARD;
+        unsafe {
+            let ki = input.u.ki_mut();
+            ki.wVk = vk;
+            ki.dwFlags = KEYEVENTF_KEYUP;
+        }
+        unsafe {
+            SendInput(1, &mut input, size_of::<INPUT>() as i32);
+        }
+    }
+    HELD_VKS.with(|h| h.borrow_mut().clear());
+
+    let scancodes: Vec<u16> = HELD_SCANCODES.with(|h| h.borrow().iter().copied().collect());
+    for scancode in scancodes {
+        let mut input: INPUT = unsafe { std::mem::zeroed() };
+        input.type_ = INPUT_KEYBOARD;
+        unsafe {
+            let ki = input.u.ki_mut();
+            ki.wScan = scancode;
+            ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+        }
+        unsafe {
+            SendInput(1, &mut input, size_of::<INPUT>() as i32);
+        }
+    }
+    HELD_SCANCODES.with(|h| h.borrow_mut().clear());
+}
 
 #[link(name = "user32")]
 extern "system" {
@@ -59,28 +103,38 @@ pub enum MouseButton {
     Left,
     Right,
     Middle,
+    Back,
+    Forward,
 }
 
 pub fn mouse_down(button: MouseButton) {
-    let flag = match button {
-        MouseButton::Left => MOUSEEVENTF_LEFTDOWN,
-        MouseButton::Right => MOUSEEVENTF_RIGHTDOWN,
-        MouseButton::Middle => MOUSEEVENTF_MIDDLEDOWN,
+    let (flag, data) = match button {
+        MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, 0),
+        MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, 0),
+        MouseButton::Middle => (MOUSEEVENTF_MIDDLEDOWN, 0),
+        MouseButton::Back => (MOUSEEVENTF_XDOWN, XBUTTON1),
+        MouseButton::Forward => (MOUSEEVENTF_XDOWN, XBUTTON2),
     };
-    send_mouse_event(flag, 0);
+    send_mouse_event(flag, data);
 }
 
 pub fn mouse_up(button: MouseButton) {
-    let flag = match button {
-        MouseButton::Left => MOUSEEVENTF_LEFTUP,
-        MouseButton::Right => MOUSEEVENTF_RIGHTUP,
-        MouseButton::Middle => MOUSEEVENTF_MIDDLEUP,
+    let (flag, data) = match button {
+        MouseButton::Left => (MOUSEEVENTF_LEFTUP, 0),
+        MouseButton::Right => (MOUSEEVENTF_RIGHTUP, 0),
+        MouseButton::Middle => (MOUSEEVENTF_MIDDLEUP, 0),
+        MouseButton::Back => (MOUSEEVENTF_XUP, XBUTTON1),
+        MouseButton::Forward => (MOUSEEVENTF_XUP, XBUTTON2),
     };
-    send_mouse_event(flag, 0);
+    send_mouse_event(flag, data);
 }
 
 pub fn mouse_scroll(delta: i32) {
     send_mouse_event(MOUSEEVENTF_WHEEL, delta);
+}
+
+pub fn mouse_hscroll(delta: i32) {
+    send_mouse_event(MOUSEEVENTF_HWHEEL, delta);
 }
 
 fn send_mouse_event(flags: u32, data: i32) {
@@ -97,6 +151,14 @@ fn send_mouse_event(flags: u32, data: i32) {
 }
 
 pub fn key_event(scancode: u16, down: bool) {
+    HELD_SCANCODES.with(|h| {
+        let mut set = h.borrow_mut();
+        if down {
+            set.insert(scancode);
+        } else {
+            set.remove(&scancode);
+        }
+    });
     let mut input: INPUT = unsafe { std::mem::zeroed() };
     input.type_ = INPUT_KEYBOARD;
     unsafe {
@@ -110,6 +172,14 @@ pub fn key_event(scancode: u16, down: bool) {
 }
 
 pub fn vk_event(vk: u16, down: bool) {
+    HELD_VKS.with(|h| {
+        let mut set = h.borrow_mut();
+        if down {
+            set.insert(vk);
+        } else {
+            set.remove(&vk);
+        }
+    });
     let mut input: INPUT = unsafe { std::mem::zeroed() };
     input.type_ = INPUT_KEYBOARD;
     unsafe {
