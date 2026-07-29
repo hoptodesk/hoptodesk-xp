@@ -491,7 +491,25 @@ impl LocalConfig {
         self.save();
     }
 
+    pub fn config_file(&self) -> &std::path::Path {
+        &self.path
+    }
+
     pub fn update_recent_peer(&mut self, id: &str, username: &str, hostname: &str, platform: &str) {
+        if self.recent_peers.iter().all(|p| p.id != id) {
+            self.recent_peers.insert(
+                0,
+                RecentPeer {
+                    id: id.to_string(),
+                    username: String::new(),
+                    hostname: String::new(),
+                    platform: String::new(),
+                },
+            );
+            if self.recent_peers.len() > 20 {
+                self.recent_peers.truncate(20);
+            }
+        }
         if let Some(peer) = self.recent_peers.iter_mut().find(|p| p.id == id) {
             if !username.is_empty() { peer.username = username.to_string(); }
             if !hostname.is_empty() { peer.hostname = hostname.to_string(); }

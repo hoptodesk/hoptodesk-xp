@@ -117,6 +117,22 @@ pub enum PageSource {
     },
 }
 
+pub fn is_shortcut_chord(alt: bool, ctrl: bool, cmd: bool, mac: bool) -> bool {
+    if mac {
+        cmd
+    } else {
+        ctrl && !alt
+    }
+}
+
+pub fn modifiers_suppress_text(alt: bool, ctrl: bool, mac: bool) -> bool {
+    if mac {
+        alt || ctrl
+    } else {
+        alt != ctrl
+    }
+}
+
 // Crash-surviving startup breadcrumbs: append+flush a line to a boot log in
 // %TEMP% at each risky milestone. On a machine we cannot attach
 // a debugger to, the last line written before an access violation names the

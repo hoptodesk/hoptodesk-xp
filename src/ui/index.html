@@ -1843,15 +1843,26 @@ self.ready = function() {
             $(#pw-settings-overlay).style#display = "none";
         }; dbg("OK: pw-settings-cancel"); } catch(e) { dbg("FAIL: pw-settings-cancel: " + e); }
 
+        function isOwnId(id) {
+            var mine = ((getOptions()["id_formatted"] || deviceIdText || "") + "").replace(/ /g, "");
+            return mine.length > 0 && mine == id;
+        }
+
+        function rejectOwnId() {
+            view.msgbox(#alert, tr("Error"), tr("You cannot connect to your own computer"));
+        }
+
         try { $(button#connect).onClick = function() {
             var id = ($(#remote-id).value || "").replace(/ /g, "");
             if (!id) return;
+            if (isOwnId(id)) { rejectOwnId(); return; }
             $(#connect-target).text = id;
         }; dbg("OK: connect"); } catch(e) { dbg("FAIL: connect: " + e); }
 
         try { $(#remote-id).onKey = function(evt) {
             if (evt.keyCode == Event.VK_RETURN) {
                 var id = (this.value || "").replace(/ /g, "");
+                if (id && isOwnId(id)) { rejectOwnId(); return true; }
                 if (id) $(#connect-target).text = id;
                 return true;
             }
@@ -1860,6 +1871,7 @@ self.ready = function() {
         try { $(button#file-transfer).onClick = function() {
             var id = ($(#remote-id).value || "").replace(/ /g, "");
             if (!id) return;
+            if (isOwnId(id)) { rejectOwnId(); return; }
             $(#ft-target).text = id;
         }; dbg("OK: file-transfer"); } catch(e) { dbg("FAIL: file-transfer: " + e); }
 

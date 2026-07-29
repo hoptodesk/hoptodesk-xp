@@ -11,6 +11,7 @@ pub struct AppState {
     pub signal_state: Arc<Mutex<signal::SignalState>>,
     pub active_tab: String,
     pub sessions_dirty: bool,
+    pub local_config_mtime: Option<std::time::SystemTime>,
 }
 
 impl AppState {
@@ -31,6 +32,7 @@ impl AppState {
             signal_state: Arc::new(Mutex::new(signal::SignalState::default())),
             active_tab: "recent".to_string(),
             sessions_dirty: true,
+            local_config_mtime: None,
         }
     }
 }

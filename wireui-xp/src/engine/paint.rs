@@ -277,7 +277,15 @@ fn paint_node(
         let cy = device_rect.y0 + (device_rect.height() - box_sz) / 2.0;
         let bx = Rect::new(cx, cy, cx + box_sz, cy + box_sz);
         let br = RoundedRect::from_rect(bx, 3.0 * s);
-        scene.fill(Fill::NonZero, Affine::IDENTITY, Color::WHITE, None, &br);
+        let tick = style.color;
+        let tick_is_light =
+            0.2126 * tick.r + 0.7152 * tick.g + 0.0722 * tick.b > 0.5 && tick.a > 0.0;
+        let fill = if tick_is_light {
+            Color::rgb8(0x0f, 0x17, 0x2a)
+        } else {
+            Color::WHITE
+        };
+        scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &br);
         let border = Color::rgb8(0x94, 0xa3, 0xb8);
         scene.stroke(
             &kurbo::Stroke::new(1.5 * s),
@@ -442,7 +450,7 @@ fn paint_node(
             }
         }
     } else if node.tag == "input" || node.tag == "select" {
-        let pad_left = 10.0 * s;
+        let pad_left = super::host::input_pad_left(Some(&style)) as f64 * s;
         // A long value must not paint past the control (the file-transfer path
         // box was drawing over the folder/trash icons to the window edge):
         // truncate with an ellipsis inside the box, leaving the select's
@@ -455,7 +463,7 @@ fn paint_node(
         let avail_w = ((device_rect.width() - pad_left - right_reserve * s) / s).max(8.0) as f32;
         let mut text_w = 0.0;
         if let Some(run) = layout.text_layouts.get(&key) {
-            let text_h = run.layout.height() as f64;
+            let text_h = run.layout.height() as f64 * s;
             let ty = device_rect.y0 + (device_rect.height() - text_h) / 2.0;
             draw_text(
                 scene,
@@ -580,7 +588,14 @@ fn paint_node(
             Some([style.color.r, style.color.g, style.color.b, style.color.a]),
         );
     } else {
+        for pass in 0..2 {
         for &child in &node.children {
+            let child_abs = styles
+                .get(&child)
+                .map_or(false, |st| st.position == super::style::Position::Absolute);
+            if (pass == 0) == child_abs {
+                continue;
+            }
             if let Some(z) = super::host::deferred_z(styles.get(&child)) {
                 *seq += 1;
                 deferred.push(Deferred {
@@ -618,6 +633,7 @@ fn paint_node(
                 scene, doc, styles, layout, child, scale, ctx, child_offset_x, child_offset,
                 deferred, seq,
             );
+        }
         }
     }
 
@@ -1030,7 +1046,7 @@ pub fn paint_tooltip(
         [0.96, 0.97, 0.98, 1.0],
         None,
         parley::layout::Alignment::Start,
-        scale,
+        1.0,
         None,
         0.0,
         true,
@@ -1118,8 +1134,12 @@ fn draw_text(
     color_now: Option<[f32; 4]>,
 ) {
     // When the line overflows an ellipsis box, stop at `limit` (leaving room for
-    // the dots) and remember where to paint them.
-    let truncate = clip_width.map_or(false, |cw| run.layout.width() > cw);
+    // the dots) and remember where to paint them. Sub-pixel overflow from layout
+    // rounding must not trigger the dots: replacing trailing characters with an
+    // ellipsis over a fraction of a pixel is how the remote-window device name
+    // flipped to "Mac M..." after a minimize/restore reshuffled fractional
+    // box positions.
+    let truncate = clip_width.map_or(false, |cw| run.layout.width() > cw + 1.0);
     let limit = clip_width.map(|cw| cw - run.layout.height() * 0.75);
     let xf = Affine::translate((origin.0, origin.1)).pre_scale(scale);
     let mut dots: Option<(f64, f64, f64, Color)> = None; // (x, baseline, font_size, color)

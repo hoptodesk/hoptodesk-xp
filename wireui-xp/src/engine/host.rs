@@ -1057,6 +1057,10 @@ impl NativeObj for ElementNative {
                     let mut engine = self.engine.borrow_mut();
                     engine.doc.clear_children(self.key);
                     let key = self.key;
+                    if let Some(node) = engine.doc.arena.get_mut(key) {
+                        node.scroll_top = 0.0;
+                        node.scroll_target = 0.0;
+                    }
                     super::html::parse_into(&mut engine.doc, key, &html)
                 };
                 ingest_new_styles(&self.engine, page.styles);
@@ -1246,10 +1250,7 @@ impl NativeObj for ElementNative {
             }
             "url" => Some(Ok(argv.first().cloned().unwrap_or(SV::Str("".into())))),
             "box" => {
-                let known = self.engine.borrow().last_rects.contains_key(&self.key);
-                if !known {
-                    ensure_layout(&self.engine);
-                }
+                ensure_layout(&self.engine);
                 let rect = {
                     let e = self.engine.borrow();
                     e.last_rects.get(&self.key).copied().unwrap_or((0.0, 0.0, 0.0, 0.0))
@@ -3484,12 +3485,12 @@ pub fn script_busy() -> bool {
     SCRIPT_BUSY.with(|c| c.get())
 }
 
-pub struct ScriptBusyGuard;
+pub struct ScriptBusyGuard(bool);
 
 impl ScriptBusyGuard {
     pub fn new() -> ScriptBusyGuard {
-        SCRIPT_BUSY.with(|c| c.set(true));
-        ScriptBusyGuard
+        let prev = SCRIPT_BUSY.with(|c| c.replace(true));
+        ScriptBusyGuard(prev)
     }
 }
 
@@ -3501,7 +3502,7 @@ impl Default for ScriptBusyGuard {
 
 impl Drop for ScriptBusyGuard {
     fn drop(&mut self) {
-        SCRIPT_BUSY.with(|c| c.set(false));
+        SCRIPT_BUSY.with(|c| c.set(self.0));
     }
 }
 
@@ -3681,6 +3682,10 @@ pub fn element_set_html(h: crate::capi::scdom::HELEMENT, html: &str) -> bool {
     let page = {
         let mut e = engine.borrow_mut();
         e.doc.clear_children(key);
+        if let Some(node) = e.doc.arena.get_mut(key) {
+            node.scroll_top = 0.0;
+            node.scroll_target = 0.0;
+        }
         super::html::parse_into(&mut e.doc, key, html)
     };
     ingest_new_styles(&engine, page.styles);
@@ -5210,6 +5215,13 @@ pub fn set_focus(engine: &EngineRef, target: Option<NodeKey>) -> bool {
 /// stay in normal document order and land on top because they render last -- so
 /// a low z-index absolute element (a card's fav-heart) does NOT float above a
 /// later modal. Shared by paint and hit-order so they cannot diverge.
+pub fn input_pad_left(style: Option<&crate::engine::style::Computed>) -> f32 {
+    match style.map(|s| s.padding[3]) {
+        Some(crate::engine::style::Length::Px(v)) if v > 0.0 => v,
+        _ => 10.0,
+    }
+}
+
 pub fn deferred_z(style: Option<&crate::engine::style::Computed>) -> Option<i32> {
     match style {
         // fixed with no z-index still escapes; treat as z 0.
@@ -5296,7 +5308,14 @@ pub fn compute_screen_geometry(
         } else {
             clip
         };
+        for pass in 0..2 {
         for &child in &node.children {
+            let child_abs = styles
+                .get(&child)
+                .map_or(false, |st| st.position == super::style::Position::Absolute);
+            if (pass == 0) == child_abs {
+                continue;
+            }
             if let Some(z) = deferred_z(styles.get(&child)) {
                 *seq += 1;
                 // Deferred overlays paint after ancestor clip layers pop, so
@@ -5314,6 +5333,7 @@ pub fn compute_screen_geometry(
                     deferred, seq,
                 );
             }
+        }
         }
     }
     let mut deferred: Vec<Deferred> = Vec::new();
@@ -5416,8 +5436,10 @@ pub fn scroll_at(
         false
     };
     let mut cur = hit;
+    let mut saw_scroller = false;
     while let Some(k) = cur {
         if styles.get(&k).map_or(false, |s| s.scroll_y) {
+            saw_scroller = true;
             let max_scroll = max_scroll_of(&e, k);
             // A scroller WITH overflow consumes the wheel even when clamped
             // at an edge (Sciter never chains past it). Chaining here let the
@@ -5433,6 +5455,13 @@ pub fn scroll_at(
             // outer scroller (or the fallback) can take the wheel.
         }
         cur = e.doc.arena.get(k).and_then(|n| n.parent);
+    }
+    // The pointer WAS over a scroller, it just has nothing to scroll. Stop
+    // here: falling through would hand the wheel to whichever unrelated box
+    // happens to have the most overflow, which is how wheeling over a short
+    // file-transfer list scrolled the other pane instead.
+    if saw_scroller {
+        return false;
     }
     // Nothing scrollable under the cursor: scroll the page's main scrollable
     // container (the one with the most overflow) so the wheel works anywhere

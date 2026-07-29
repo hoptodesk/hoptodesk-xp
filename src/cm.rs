@@ -349,6 +349,9 @@ unsafe extern "system" fn cm_timer_callback(
     _id: usize,
     _time: u32,
 ) {
+    if sciter::engine::host::script_busy() {
+        return;
+    }
     let hwnd = CM_HWND;
     if hwnd.is_null() {
         return;

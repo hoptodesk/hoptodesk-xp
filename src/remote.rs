@@ -326,6 +326,9 @@ unsafe extern "system" fn remote_timer_callback(
     _id: usize,
     _time: u32,
 ) {
+    if sciter::engine::host::script_busy() {
+        return;
+    }
     static mut TICK_COUNT: u32 = 0;
     if RESET_TICK_COUNT {
         TICK_COUNT = 0;
@@ -778,17 +781,17 @@ unsafe extern "system" fn remote_timer_callback(
     if frame_seq > LAST_FRAME_SEQ && frame_w > 0 && frame_h > 0 {
         LAST_FRAME_SEQ = frame_seq;
 
-        let frame_data = {
+        let (frame_data, draw_w, draw_h) = {
             let cs = match client_state.lock() {
                 Ok(s) => s,
                 Err(_) => return,
             };
-            let expected = (cs.frame_width * cs.frame_height * 4) as usize;
+            let expected = cs.frame_width.max(0) as usize * cs.frame_height.max(0) as usize * 4;
             if cs.frame_data.len() != expected {
                 crate::config::write_log(&format!("[remote/timer] frame size mismatch: got {} expected {}", cs.frame_data.len(), expected));
                 return;
             }
-            cs.frame_data.clone()
+            (cs.frame_data.clone(), cs.frame_width, cs.frame_height)
         };
 
         if VIDEO_HWND.is_null() && !IS_FILE_TRANSFER_MODE {
@@ -818,7 +821,7 @@ unsafe extern "system" fn remote_timer_callback(
             let _ = el.set_style_attribute("display", "none");
         }
 
-        render_frame_gdi(hwnd, &frame_data, frame_w, frame_h);
+        render_frame_gdi(hwnd, &frame_data, draw_w, draw_h);
     }
 }
 
@@ -1479,6 +1482,8 @@ unsafe fn poll_ft_flags(
 unsafe fn render_frame_gdi(hwnd: sciter::types::HWINDOW, bgra: &[u8], width: i32, height: i32) {
     let video = VIDEO_HWND;
     if video.is_null() { return; }
+    if width <= 0 || height <= 0 { return; }
+    if bgra.len() < width as usize * height as usize * 4 { return; }
 
     let mut parent_rect = [0i32; 4];
     GetClientRect(hwnd as *mut std::ffi::c_void, &mut parent_rect);

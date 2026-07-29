@@ -574,8 +574,7 @@ fn run_client_inner(
 
             {
                 let mut peer_cfg = crate::config::PeerConfig::load(target_id);
-                if !pi.username.is_empty() || !pi.hostname.is_empty() {
-
+                {
                     let mut local_cfg = crate::config::LocalConfig::load();
                     local_cfg.update_recent_peer(target_id, &pi.username, &pi.hostname, &pi.platform);
                 }

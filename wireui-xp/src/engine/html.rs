@@ -230,7 +230,30 @@ pub fn parse_into(doc: &mut Document, parent: NodeKey, source: &str) -> ParsedPa
                 }
             }
             let current = *stack.last().unwrap();
-            doc.append_child(current, key);
+            let merged_into_root = tag_lower == "html"
+                && current == doc.root
+                && doc.arena.get(current).map_or(false, |n| n.tag == "html");
+            if merged_into_root {
+                let attrs = doc.arena.get(key).map(|n| n.attrs.clone()).unwrap_or_default();
+                for (name, value) in attrs {
+                    if let Some(root) = doc.arena.get_mut(current) {
+                        if name == "class" {
+                            let existing = root.attr("class").unwrap_or("").to_string();
+                            let merged = if existing.is_empty() {
+                                value
+                            } else {
+                                format!("{} {}", existing, value)
+                            };
+                            root.set_attr("class", &merged);
+                        } else {
+                            root.set_attr(&name, &value);
+                        }
+                    }
+                }
+                doc.arena.remove(key);
+            } else {
+                doc.append_child(current, key);
+            }
             if tag_lower == "style" || tag_lower == "script" {
                 let close = format!("</{}", tag_lower);
                 let end = find_sub_ci(&chars, pos, &close).unwrap_or(chars.len());
@@ -247,7 +270,7 @@ pub fn parse_into(doc: &mut Document, parent: NodeKey, source: &str) -> ParsedPa
                 continue;
             }
             if !self_closing && !VOID_TAGS.contains(&tag_lower.as_str()) {
-                stack.push(key);
+                stack.push(if merged_into_root { current } else { key });
             }
         } else {
             let start = pos;

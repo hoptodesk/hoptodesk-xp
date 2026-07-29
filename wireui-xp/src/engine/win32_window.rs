@@ -382,10 +382,12 @@ fn update_os_metrics(hwnd: HWND) {
     }
 }
 
-fn os_window_state(hwnd: HWND) -> i64 {
+fn os_window_state(hwnd: HWND, fullscreen: bool) -> i64 {
     unsafe {
         if IsIconic(hwnd) != 0 {
             2
+        } else if fullscreen {
+            5
         } else if IsZoomed(hwnd) != 0 {
             3
         } else if IsWindowVisible(hwnd) == 0 {
@@ -647,7 +649,7 @@ fn create_child_window(pending: host::PendingChildWindow) {
 fn engine_tick(hwnd: HWND, st: &mut WinState) {
     let engine = st.engine.clone();
     let now = st.start.elapsed().as_millis() as f64;
-    let osst = os_window_state(hwnd);
+    let osst = os_window_state(hwnd, st.saved_rect.is_some());
     host::set_current_window_state(osst);
     if osst != st.last_window_state {
         st.last_window_state = osst;
@@ -807,7 +809,15 @@ unsafe extern "system" fn wndproc(
     let Some(state) = state_for(hwnd) else {
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     };
-    let engine = state.borrow().engine.clone();
+    // A modal (view.msgbox) opened from a script handler pumps the message
+    // queue, so this procedure re-enters while an outer message still holds the
+    // window state. Let the default handler take those rather than panicking on
+    // the borrow.
+    let Ok(state_ref) = state.try_borrow() else {
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    };
+    let engine = state_ref.engine.clone();
+    drop(state_ref);
     host::set_current_engine(&engine);
     host::set_current_window_hwnd(hwnd as usize);
     if matches!(
@@ -854,7 +864,7 @@ unsafe extern "system" fn wndproc(
                 host::fire_view_event(interp, &engine, "size");
                 host::drain_events(interp, &engine);
             });
-            let osst = os_window_state(hwnd);
+            let osst = os_window_state(hwnd, state.borrow().saved_rect.is_some());
             host::set_current_window_state(osst);
             {
                 let mut st = state.borrow_mut();
@@ -935,7 +945,7 @@ unsafe extern "system" fn wndproc(
                             let e = engine.borrow();
                             e.doc.arena.get(t).map_or(false, |n| n.tag == "textarea")
                         };
-                        let pad = if is_ta { 5.0 } else { 10.0 };
+                        let pad = if is_ta { 5.0 } else { host::input_pad_left(styles.get(&t)) };
                         let (cy, wrap) = if is_ta {
                             (y - r.1 - pad, Some((r.2 - 2.0 * pad).max(8.0)))
                         } else {
@@ -1166,7 +1176,7 @@ unsafe extern "system" fn wndproc(
                             let e = engine.borrow();
                             e.doc.arena.get(t).map_or(false, |n| n.tag == "textarea")
                         };
-                        let pad = if is_ta { 5.0 } else { 10.0 };
+                        let pad = if is_ta { 5.0 } else { host::input_pad_left(styles.get(&t)) };
                         let (cy, wrap) = if is_ta {
                             (y - r.1 - pad, Some((r.2 - 2.0 * pad).max(8.0)))
                         } else {
@@ -1213,6 +1223,7 @@ unsafe extern "system" fn wndproc(
         WM_LBUTTONUP => {
             ReleaseCapture();
             let (x, y) = lparam_xy(lparam);
+            let mut pending_show: Option<i32> = None;
             let mut st = state.borrow_mut();
             st.cursor = (x, y);
             if let Some(k) = st.text_drag.take() {
@@ -1315,20 +1326,21 @@ unsafe extern "system" fn wndproc(
                 };
                 match role {
                     Some("close") => host::request_view_close(),
-                    Some("minimize") => {
-                        ShowWindow(hwnd, SW_MINIMIZE);
-                    }
+                    Some("minimize") => pending_show = Some(SW_MINIMIZE),
                     Some("maximize") => {
-                        if IsZoomed(hwnd) != 0 {
-                            ShowWindow(hwnd, SW_SHOWNORMAL);
+                        pending_show = Some(if IsZoomed(hwnd) != 0 {
+                            SW_SHOWNORMAL
                         } else {
-                            ShowWindow(hwnd, SW_MAXIMIZE);
-                        }
+                            SW_MAXIMIZE
+                        });
                     }
                     _ => {}
                 }
             }
             drop(st);
+            if let Some(cmd) = pending_show {
+                ShowWindow(hwnd, cmd);
+            }
             after_script(hwnd, &state);
             invalidate(hwnd);
             0
@@ -1513,6 +1525,7 @@ unsafe extern "system" fn wndproc(
                 let styles = host::cached_computed_styles(&engine);
                 let screen = engine.borrow().screen_rects.clone();
                 host::scroll_at(&engine, &screen, x, y, -(delta as f32) * host::scroll_step(), &styles);
+                host::animate_scroll(&engine);
             }
             invalidate(hwnd);
             0
@@ -1566,7 +1579,7 @@ unsafe extern "system" fn wndproc(
                 }
             }
             let shift = mods.2;
-            let ctrl = mods.1;
+            let ctrl = super::window::is_shortcut_chord(mods.0, mods.1, mods.3, false);
             let mut dirty = false;
             match wparam as i32 {
                 VK_BACK => dirty = host::backspace(&engine),
@@ -1673,7 +1686,9 @@ unsafe extern "system" fn wndproc(
         WM_CHAR => {
             let code = wparam as u32;
             if let Some(ch) = char::from_u32(code) {
-                if !ch.is_control() && !mods.1 && !mods.0 {
+                if !ch.is_control()
+                    && !super::window::modifiers_suppress_text(mods.0, mods.1, false)
+                {
                     let consumed = with_interp(|interp| {
                         if host::dispatch_on_key(interp, &engine, 0x2003, ch as i64, mods) {
                             host::drain_events(interp, &engine);

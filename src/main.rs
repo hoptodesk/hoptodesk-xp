@@ -951,6 +951,9 @@ unsafe extern "system" fn main_timer_callback(
     _id: usize,
     _time: u32,
 ) {
+    if sciter::engine::host::script_busy() {
+        return;
+    }
     let state = match TIMER_STATE.as_ref() {
         Some(s) => s,
         None => return,
@@ -1037,8 +1040,6 @@ unsafe extern "system" fn main_timer_callback(
 
             if let Ok(mut s) = state.lock() {
                 s.local_config.set_remote_id(&target_id);
-                s.local_config.add_recent_peer(&target_id);
-                s.sessions_dirty = true;
             }
 
             let exe = std::env::current_exe().unwrap_or_default();
@@ -1065,8 +1066,6 @@ unsafe extern "system" fn main_timer_callback(
 
             if let Ok(mut s) = state.lock() {
                 s.local_config.set_remote_id(&target_id);
-                s.local_config.add_recent_peer(&target_id);
-                s.sessions_dirty = true;
             }
 
             let exe = std::env::current_exe().unwrap_or_default();
@@ -1385,6 +1384,16 @@ unsafe extern "system" fn main_timer_callback(
         let mut items_html = String::new();
 
         if let Ok(mut s) = state.lock() {
+            let disk_mtime = std::fs::metadata(s.local_config.config_file())
+                .and_then(|m| m.modified())
+                .ok();
+            if disk_mtime != s.local_config_mtime {
+                if s.local_config_mtime.is_some() {
+                    s.local_config = config::LocalConfig::load();
+                    s.sessions_dirty = true;
+                }
+                s.local_config_mtime = disk_mtime;
+            }
             if s.sessions_dirty {
                 s.sessions_dirty = false;
                 should_update = true;

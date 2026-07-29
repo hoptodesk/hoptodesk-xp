@@ -242,6 +242,20 @@ fn num2(v: &SV) -> Option<f64> {
     }
 }
 
+fn num_coerce(v: &SV) -> Option<f64> {
+    match v {
+        SV::Str(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else {
+                t.parse::<f64>().ok()
+            }
+        }
+        _ => num2(v),
+    }
+}
+
 pub fn loose_eq(a: &SV, b: &SV) -> bool {
     match (a, b) {
         (SV::Undefined | SV::Null, SV::Undefined | SV::Null) => true,
@@ -254,7 +268,7 @@ pub fn loose_eq(a: &SV, b: &SV) -> bool {
         (SV::Class(x), SV::Class(y)) => Gc::ptr_eq(x, y),
         (SV::Function(x), SV::Function(y)) => Gc::ptr_eq(x, y),
         (SV::NativeFn(x), SV::NativeFn(y)) => Gc::ptr_eq(x, y),
-        _ => match (num2(a), num2(b)) {
+        _ => match (num_coerce(a), num_coerce(b)) {
             (Some(x), Some(y)) => x == y,
             _ => false,
         },
@@ -269,6 +283,8 @@ fn strict_eq(a: &SV, b: &SV) -> bool {
         (SV::Float(x), SV::Float(y)) => x == y,
         (SV::Int(_), SV::Float(_)) | (SV::Float(_), SV::Int(_)) => false,
         (SV::Undefined | SV::Null, _) | (_, SV::Undefined | SV::Null) => false,
+        (SV::Str(_), SV::Bool(_) | SV::Int(_) | SV::Float(_) | SV::Unit(..))
+        | (SV::Bool(_) | SV::Int(_) | SV::Float(_) | SV::Unit(..), SV::Str(_)) => false,
         _ => loose_eq(a, b),
     }
 }
@@ -884,7 +900,7 @@ impl Interp {
             Expr::Unary(op, e) => {
                 if *op == "++" || *op == "--" {
                     let old = self.eval(e, env)?;
-                    let n = num2(&old).unwrap_or(0.0);
+                    let n = num_coerce(&old).unwrap_or(0.0);
                     let delta = if *op == "++" { 1.0 } else { -1.0 };
                     let new = match old {
                         SV::Float(_) => SV::Float(n + delta),
@@ -914,7 +930,7 @@ impl Interp {
             }
             Expr::Postfix(op, e) => {
                 let old = self.eval(e, env)?;
-                let n = num2(&old).unwrap_or(0.0);
+                let n = num_coerce(&old).unwrap_or(0.0);
                 let delta = if *op == "++" { 1.0 } else { -1.0 };
                 let new = match old {
                     SV::Float(_) => SV::Float(n + delta),
@@ -1060,7 +1076,7 @@ impl Interp {
                         _ => unreachable!(),
                     };
                 }
-                let (a, b) = match (num2(x), num2(y)) {
+                let (a, b) = match (num_coerce(x), num_coerce(y)) {
                     (Some(a), Some(b)) => (a, b),
                     _ => return self.throw(format!("cannot apply '{}' to non-numbers", op)),
                 };
@@ -1087,7 +1103,7 @@ impl Interp {
                     };
                     return Ok(SV::Bool(r));
                 }
-                let (a, b) = match (num2(x), num2(y)) {
+                let (a, b) = match (num_coerce(x), num_coerce(y)) {
                     (Some(a), Some(b)) => (a, b),
                     _ => return Ok(SV::Bool(false)),
                 };
@@ -1100,7 +1116,7 @@ impl Interp {
                 }))
             }
             "&" | "|" | "^" | "<<" | ">>" | ">>>" => {
-                let (a, b) = match (num2(x), num2(y)) {
+                let (a, b) = match (num_coerce(x), num_coerce(y)) {
                     (Some(a), Some(b)) => (a as i64, b as i64),
                     _ => {
                         return self.throw(&format!(
