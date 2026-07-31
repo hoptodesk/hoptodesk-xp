@@ -4,7 +4,7 @@ exclude = ["wireui-xp"]
 
 [package]
 name = "hoptodesk"
-version = "1.46.10"
+version = "1.46.12"
 authors = ["hoptodesk <info@hoptodesk.com>"]
 edition = "2021"
 rust-version = "1.75"

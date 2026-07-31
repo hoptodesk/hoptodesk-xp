@@ -213,7 +213,14 @@ fn parse_svg_transform(text: &str) -> Affine {
             }
             "rotate" => {
                 let deg = args.first().copied().unwrap_or(0.0);
-                out *= Affine::rotate(deg.to_radians());
+                match (args.get(1), args.get(2)) {
+                    (Some(&cx), Some(&cy)) => {
+                        out *= Affine::translate((cx, cy))
+                            * Affine::rotate(deg.to_radians())
+                            * Affine::translate((-cx, -cy));
+                    }
+                    _ => out *= Affine::rotate(deg.to_radians()),
+                }
             }
             _ => {}
         }

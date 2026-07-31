@@ -61,6 +61,23 @@ thread_local! {
 
 thread_local! {
     static PENDING_HWND: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static PENDING_HIGH_SURROGATE: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
+}
+
+fn char_from_utf16_unit(unit: u16) -> Option<char> {
+    if (0xD800..0xDC00).contains(&unit) {
+        PENDING_HIGH_SURROGATE.with(|c| c.set(unit));
+        return None;
+    }
+    let high = PENDING_HIGH_SURROGATE.with(|c| c.replace(0));
+    if (0xDC00..0xE000).contains(&unit) {
+        if high == 0 {
+            return None;
+        }
+        let cp = 0x10000 + (((high as u32) - 0xD800) << 10) + ((unit as u32) - 0xDC00);
+        return char::from_u32(cp);
+    }
+    char::from_u32(unit as u32)
 }
 
 pub fn create_main_window() -> usize {
@@ -1684,8 +1701,7 @@ unsafe extern "system" fn wndproc(
             }
         }
         WM_CHAR => {
-            let code = wparam as u32;
-            if let Some(ch) = char::from_u32(code) {
+            if let Some(ch) = char_from_utf16_unit(wparam as u16) {
                 if !ch.is_control()
                     && !super::window::modifiers_suppress_text(mods.0, mods.1, false)
                 {
