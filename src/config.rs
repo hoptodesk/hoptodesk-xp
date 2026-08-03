@@ -916,23 +916,30 @@ pub fn mask_ip(addr: &impl std::fmt::Display) -> String {
     if truncated != s { truncated } else { s }
 }
 
+lazy_static::lazy_static! {
+    static ref LOG_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
+
 pub fn write_log(msg: &str) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let h = (secs % 86400) / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    let line = format!("[{:02}:{:02}:{:02}] {}\n", h, m, s, msg);
+
     let path = log_path();
+    let _guard = LOG_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
     {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let h = (secs % 86400) / 3600;
-        let m = (secs % 3600) / 60;
-        let s = secs % 60;
-        let _ = writeln!(f, "[{:02}:{:02}:{:02}] {}", h, m, s, msg);
+        let _ = f.write_all(line.as_bytes());
     }
 }
 
