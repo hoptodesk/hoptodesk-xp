@@ -31,6 +31,22 @@ fn get_cm_session() -> Option<String> {
     CURRENT_CM_SESSION.with(|s| s.borrow().clone())
 }
 
+pub(crate) fn cm_disconnect_requested() -> bool {
+    match get_cm_session() {
+        Some(sid) => cm::cm_rejected_path(&sid).exists(),
+        None => false,
+    }
+}
+
+pub(crate) fn send_session_close(stream: &mut FramedStream) {
+    let mut misc = message_proto::Misc::new();
+    misc.set_close_reason("The remote partner has closed the session.".to_string());
+    let mut msg = message_proto::Message::new();
+    msg.set_misc(misc);
+    let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
+    std::thread::sleep(Duration::from_millis(150));
+}
+
 pub fn run_direct_server(
     my_id: String,
     password: String,
@@ -88,6 +104,7 @@ pub fn run_direct_server(
                         "[direct] Incoming connection from {}",
                         crate::config::mask_ip(&peer_addr)
                     ));
+                    tcp_stream.set_nonblocking(false).ok();
                     tcp_stream.set_nodelay(true).ok();
 
                     let my_id = my_id.clone();
@@ -133,6 +150,7 @@ pub fn accept_connection(
         match listener.accept() {
             Ok((tcp_stream, peer_addr)) => {
                 crate::config::write_log(&format!("[server] Accepted connection from {}", crate::config::mask_ip(&peer_addr)));
+                tcp_stream.set_nonblocking(false).ok();
                 tcp_stream.set_nodelay(true).ok();
                 let mut stream = FramedStream::from_tcp(tcp_stream);
                 stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
@@ -889,21 +907,10 @@ fn run_video_input_loop(
 
         if last_cm_check.elapsed() >= Duration::from_millis(500) {
             last_cm_check = Instant::now();
-            if let Some(cm_sid) = get_cm_session() {
-                let sid = &cm_sid; {
-                    if cm::cm_rejected_path(sid).exists() {
-                        crate::config::write_log(&format!("[server] CM user disconnected session"));
-
-                        let mut misc = message_proto::Misc::new();
-                        misc.set_close_reason("The remote partner has closed the session.".to_string());
-                        let mut close_msg = message_proto::Message::new();
-                        close_msg.set_misc(misc);
-                        let _ = stream.send_msg(&close_msg.write_to_bytes().unwrap_or_default());
-
-                        std::thread::sleep(Duration::from_millis(150));
-                        break;
-                    }
-                }
+            if cm_disconnect_requested() {
+                crate::config::write_log("[server] CM user disconnected session");
+                send_session_close(stream);
+                break;
             }
         }
 
@@ -1003,6 +1010,15 @@ fn run_video_input_loop(
                                     quality_ratio, kbps, video_target_fps(image_quality, custom_fps)
                                 ));
                             }
+                        }
+                        let refresh_requested = match &misc.union {
+                            Some(message_proto::misc::Union::RefreshVideo(r)) => *r,
+                            Some(message_proto::misc::Union::RefreshVideoDisplay(_)) => true,
+                            _ => false,
+                        };
+                        if refresh_requested {
+                            force_keyframe = true;
+                            crate::config::write_log("[server] Refresh requested, forcing keyframe");
                         }
                     }
 
@@ -1170,11 +1186,11 @@ fn run_video_input_loop(
             if let Some(cs) = platform::get_cursor() {
                 if cs.visible {
                     if cs.cursor_handle != 0 && cs.cursor_handle != last_cursor_handle {
-                        if let Some(data) = platform::get_cursor_data(cs.cursor_handle) {
-                            if data.width <= 0 || data.height <= 0
-                                || data.colors.len() != (data.width * data.height * 4) as usize {
-                                continue;
-                            }
+                        if let Some(data) = platform::get_cursor_data(cs.cursor_handle).filter(|d| {
+                            d.width > 0
+                                && d.height > 0
+                                && d.colors.len() == (d.width * d.height * 4) as usize
+                        }) {
                             let mut colors = data.colors;
                             let mut i = 0;
                             while i + 2 < colors.len() {
@@ -1657,8 +1673,17 @@ fn run_port_forward_loop(
 
     let mut buf = [0u8; 65536];
     let mut idle_count = 0u32;
+    let mut last_cm_check = Instant::now();
     loop {
         if stop.load(Ordering::Relaxed) { break; }
+
+        if last_cm_check.elapsed() >= Duration::from_millis(500) {
+            last_cm_check = Instant::now();
+            if cm_disconnect_requested() {
+                crate::config::write_log("[server/pf] CM user disconnected session");
+                break;
+            }
+        }
 
         let mut had_data = false;
 
@@ -1714,12 +1739,22 @@ fn run_file_transfer_loop(
 
     let mut delayed_dir_sent = false;
     let mut last_keepalive = Instant::now();
+    let mut last_cm_check = Instant::now();
     let mut show_hidden = false;
 
     loop {
         if stop.load(Ordering::Relaxed) {
             crate::config::write_log("[server/ft] Stop flag set, exiting loop");
             break;
+        }
+
+        if last_cm_check.elapsed() >= Duration::from_millis(500) {
+            last_cm_check = Instant::now();
+            if cm_disconnect_requested() {
+                crate::config::write_log("[server/ft] CM user disconnected session");
+                send_session_close(stream);
+                break;
+            }
         }
 
         if last_keepalive.elapsed() >= Duration::from_secs(3) {

@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} kviečia šį kompiuterį prisijungti prie savo skydelio. Esama sąsaja bus pašalinta."),
         ("{} is inviting this computer to join their dashboard.", "{} kviečia šį kompiuterį prisijungti prie savo skydelio."),
         ("You can undo this any time in Settings > Dashboard.", "Galite tai atšaukti bet kuriuo metu skiltyje Nustatymai > Skydelis."),
+        ("A secure connection could not be established. Continue anyway?", "Nepavyko užmegzti saugaus ryšio. Vis tiek tęsti?"),
+        ("Connection not secure", "Ryšys nesaugus"),
+        ("Ticket submitted but attachment upload failed: ", "Užklausa išsiųsta, bet priedo įkelti nepavyko: "),
     ].iter().cloned().collect();
 }

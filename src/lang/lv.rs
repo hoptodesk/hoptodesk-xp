@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} aicina šo datoru pievienoties savam panelim. Esošā saite tiks noņemta."),
         ("{} is inviting this computer to join their dashboard.", "{} aicina šo datoru pievienoties savam panelim."),
         ("You can undo this any time in Settings > Dashboard.", "Jūs varat to atsaukt jebkurā laikā sadaļā Iestatījumi > Panelis."),
+        ("A secure connection could not be established. Continue anyway?", "Neizdevās izveidot drošu savienojumu. Vai tomēr turpināt?"),
+        ("Connection not secure", "Savienojums nav drošs"),
+        ("Ticket submitted but attachment upload failed: ", "Pieteikums nosūtīts, bet pielikuma augšupielāde neizdevās: "),
     ].iter().cloned().collect();
 }

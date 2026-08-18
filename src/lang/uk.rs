@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} запрошує цей комп'ютер приєднатися до своєї панелі. Наявне прив'язування буде видалено."),
         ("{} is inviting this computer to join their dashboard.", "{} запрошує цей комп'ютер приєднатися до своєї панелі."),
         ("You can undo this any time in Settings > Dashboard.", "Ви можете скасувати це будь-коли в Налаштування > Панель."),
+        ("A secure connection could not be established. Continue anyway?", "Не вдалося встановити захищене з'єднання. Все одно продовжити?"),
+        ("Connection not secure", "З'єднання не захищене"),
+        ("Ticket submitted but attachment upload failed: ", "Тикет надіслано, але не вдалося завантажити вкладення: "),
     ].iter().cloned().collect();
 }

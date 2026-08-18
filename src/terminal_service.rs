@@ -559,11 +559,21 @@ pub fn run_terminal_loop(stream: &mut FramedStream, stop: &Arc<AtomicBool>) -> i
 
     let mut sessions: HashMap<i32, TerminalSession> = HashMap::new();
     let mut last_keepalive = std::time::Instant::now();
+    let mut last_cm_check = std::time::Instant::now();
 
     loop {
         if stop.load(Ordering::Relaxed) {
             crate::config::write_log("[terminal] Stop flag set, exiting loop");
             break;
+        }
+
+        if last_cm_check.elapsed() >= Duration::from_millis(500) {
+            last_cm_check = std::time::Instant::now();
+            if crate::server::cm_disconnect_requested() {
+                crate::config::write_log("[terminal] CM user disconnected session");
+                crate::server::send_session_close(stream);
+                break;
+            }
         }
 
         if last_keepalive.elapsed() >= Duration::from_secs(3) {

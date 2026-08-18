@@ -1,11 +1,52 @@
 
 use std::mem::size_of;
 use winapi::um::winuser::{
-    SendInput, INPUT, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
-    KEYEVENTF_SCANCODE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
-    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
-    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT,
+    SendInput, INPUT, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
+    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT, VK_APPS,
+    VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_HOME, VK_INSERT, VK_LEFT, VK_LWIN, VK_NEXT,
+    VK_PRIOR, VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RWIN, VK_SNAPSHOT, VK_UP,
 };
+
+fn is_extended_vk(vk: u16) -> bool {
+    matches!(
+        vk as i32,
+        VK_INSERT
+            | VK_DELETE
+            | VK_HOME
+            | VK_END
+            | VK_PRIOR
+            | VK_NEXT
+            | VK_LEFT
+            | VK_RIGHT
+            | VK_UP
+            | VK_DOWN
+            | VK_DIVIDE
+            | VK_SNAPSHOT
+            | VK_RCONTROL
+            | VK_RMENU
+            | VK_LWIN
+            | VK_RWIN
+            | VK_APPS
+    )
+}
+
+fn scan_with_flags(scancode: u16) -> (u16, u32) {
+    if scancode & 0xFF00 == 0xE000 {
+        (scancode & 0x00FF, KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY)
+    } else {
+        (scancode, KEYEVENTF_SCANCODE)
+    }
+}
+
+fn vk_flags(vk: u16) -> u32 {
+    if is_extended_vk(vk) {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        0
+    }
+}
 
 const KEYEVENTF_UNICODE: u32 = 0x0004;
 const MOUSEEVENTF_XDOWN: u32 = 0x0080;
@@ -29,7 +70,7 @@ pub fn release_all_held_keys() {
         unsafe {
             let ki = input.u.ki_mut();
             ki.wVk = vk;
-            ki.dwFlags = KEYEVENTF_KEYUP;
+            ki.dwFlags = vk_flags(vk) | KEYEVENTF_KEYUP;
         }
         unsafe {
             SendInput(1, &mut input, size_of::<INPUT>() as i32);
@@ -43,8 +84,9 @@ pub fn release_all_held_keys() {
         input.type_ = INPUT_KEYBOARD;
         unsafe {
             let ki = input.u.ki_mut();
-            ki.wScan = scancode;
-            ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+            let (scan, flags) = scan_with_flags(scancode);
+            ki.wScan = scan;
+            ki.dwFlags = flags | KEYEVENTF_KEYUP;
         }
         unsafe {
             SendInput(1, &mut input, size_of::<INPUT>() as i32);
@@ -163,8 +205,9 @@ pub fn key_event(scancode: u16, down: bool) {
     input.type_ = INPUT_KEYBOARD;
     unsafe {
         let ki = input.u.ki_mut();
-        ki.wScan = scancode;
-        ki.dwFlags = KEYEVENTF_SCANCODE | if down { 0 } else { KEYEVENTF_KEYUP };
+        let (scan, flags) = scan_with_flags(scancode);
+        ki.wScan = scan;
+        ki.dwFlags = flags | if down { 0 } else { KEYEVENTF_KEYUP };
     }
     unsafe {
         SendInput(1, &mut input, size_of::<INPUT>() as i32);
@@ -185,7 +228,7 @@ pub fn vk_event(vk: u16, down: bool) {
     unsafe {
         let ki = input.u.ki_mut();
         ki.wVk = vk;
-        ki.dwFlags = if down { 0 } else { KEYEVENTF_KEYUP };
+        ki.dwFlags = vk_flags(vk) | if down { 0 } else { KEYEVENTF_KEYUP };
     }
     unsafe {
         SendInput(1, &mut input, size_of::<INPUT>() as i32);
@@ -236,6 +279,10 @@ pub fn char_to_vk(ch: char) -> Option<(u16, bool)> {
 }
 
 pub fn vk_to_scancode_event(vk: u16, down: bool) {
+    if is_extended_vk(vk) {
+        vk_event(vk, down);
+        return;
+    }
     let scan = unsafe { MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) } as u16;
     if scan != 0 {
         key_event(scan, down);
@@ -282,12 +329,6 @@ pub fn win2win_hotkey_event(code: u32, down: bool) {
     }
     let vk = ((code >> 16) & 0x0000FFFF) as u16;
     if vk != 0 {
-
-        let scan = unsafe { MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) } as u16;
-        if scan != 0 {
-            key_event(scan, down);
-        } else {
-            vk_event(vk, down);
-        }
+        vk_to_scancode_event(vk, down);
     }
 }

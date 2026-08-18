@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} がこのコンピューターを自分のダッシュボードへの参加に招待しています。既存のリンクは削除されます。"),
         ("{} is inviting this computer to join their dashboard.", "{} がこのコンピューターを自分のダッシュボードへの参加に招待しています。"),
         ("You can undo this any time in Settings > Dashboard.", "設定 > ダッシュボードでいつでも取り消すことができます。"),
+        ("A secure connection could not be established. Continue anyway?", "安全な接続を確立できませんでした。続行しますか？"),
+        ("Connection not secure", "接続は安全ではありません"),
+        ("Ticket submitted but attachment upload failed: ", "チケットは送信されましたが、添付ファイルのアップロードに失敗しました: "),
     ].iter().cloned().collect();
 }

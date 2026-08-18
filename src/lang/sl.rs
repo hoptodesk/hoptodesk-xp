@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} vabi ta računalnik, da se pridruži njegovi nadzorni plošči namesto tega. Obstoječa povezava bo odstranjena."),
         ("{} is inviting this computer to join their dashboard.", "{} vabi ta računalnik, da se pridruži njegovi nadzorni plošči."),
         ("You can undo this any time in Settings > Dashboard.", "To lahko kadar koli razveljavite v Nastavitve > Nadzorna plošča."),
+        ("A secure connection could not be established. Continue anyway?", "Varne povezave ni bilo mogoče vzpostaviti. Ali želite vseeno nadaljevati?"),
+        ("Connection not secure", "Povezava ni varna"),
+        ("Ticket submitted but attachment upload failed: ", "Zahtevek poslan, a nalaganje priloge ni uspelo: "),
     ].iter().cloned().collect();
 }

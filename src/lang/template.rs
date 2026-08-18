@@ -884,5 +884,23 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Connection not secure", ""),
         ("A secure connection could not be established. Continue anyway?", ""),
 
+        ("A previous request is still pending on the remote.", ""),
+        ("Accept Dashboard Invite?", ""),
+        ("Add remote device to my dashboard", ""),
+        ("Add to my Dashboard", ""),
+        ("Added to dashboard", ""),
+        ("No local IP available - showing ID", ""),
+        ("No response from the remote, request timed out.", ""),
+        ("Request declined", ""),
+        ("Request sent, waiting for the remote user to confirm.", ""),
+        ("Switch to ID", ""),
+        ("Switch to local IP", ""),
+        ("The invite code is invalid or expired. Please try again later.", ""),
+        ("The remote accepted but enrollment failed. They may be offline or unable to reach the dashboard.", ""),
+        ("This device is already linked to your dashboard.", ""),
+        ("This remote platform isn't supported for dashboard enrollment yet.", ""),
+        ("Your IP", ""),
+        ("Your local IP address - share this for direct LAN connections", ""),
+        ("{} is inviting this computer to join their dashboard.", ""),
     ].iter().cloned().collect();
 }

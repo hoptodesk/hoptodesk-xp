@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} està convidant aquest ordinador a unir-se al seu tauler. El vincle existent serà eliminat."),
         ("{} is inviting this computer to join their dashboard.", "{} està convidant aquest ordinador a unir-se al seu tauler."),
         ("You can undo this any time in Settings > Dashboard.", "Pots desfer-ho en qualsevol moment a Configuració > Tauler."),
+        ("A secure connection could not be established. Continue anyway?", "No s'ha pogut establir una connexió segura. Voleu continuar igualment?"),
+        ("Connection not secure", "La connexió no és segura"),
+        ("Ticket submitted but attachment upload failed: ", "Tiquet enviat, però la càrrega de l'adjunt ha fallat: "),
     ].iter().cloned().collect();
 }

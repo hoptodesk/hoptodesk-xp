@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} đang mời máy tính này tham gia dashboard của họ thay thế. Liên kết hiện tại sẽ bị xóa."),
         ("{} is inviting this computer to join their dashboard.", "{} đang mời máy tính này tham gia dashboard của họ."),
         ("You can undo this any time in Settings > Dashboard.", "Bạn có thể hoàn tác bất kỳ lúc nào trong Cài đặt > Dashboard."),
+        ("A secure connection could not be established. Continue anyway?", "Không thể thiết lập kết nối an toàn. Vẫn tiếp tục?"),
+        ("Connection not secure", "Kết nối không an toàn"),
+        ("Ticket submitted but attachment upload failed: ", "Đã gửi yêu cầu nhưng tải tệp đính kèm thất bại: "),
     ].iter().cloned().collect();
 }

@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{}-(e)k ordenagailu hau bere panelean elkartzeko gonbidatzen ari da. Lehendik dagoen lotura kenduko da."),
         ("{} is inviting this computer to join their dashboard.", "{}-(e)k ordenagailu hau bere panelean elkartzeko gonbidatzen ari da."),
         ("You can undo this any time in Settings > Dashboard.", "Edozein momentutan desegin dezakezu Ezarpenak > Panela atalean."),
+        ("A secure connection could not be established. Continue anyway?", "Ezin izan da konexio seguru bat ezarri. Jarraitu hala ere?"),
+        ("Connection not secure", "Konexioa ez da segurua"),
+        ("Ticket submitted but attachment upload failed: ", "Tiketa bidali da, baina eranskina ez da kargatu: "),
     ].iter().cloned().collect();
 }

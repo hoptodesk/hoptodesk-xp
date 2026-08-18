@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} mengundang komputer ini untuk bergabung dengan dashboardnya. Tautan yang ada akan dihapus."),
         ("{} is inviting this computer to join their dashboard.", "{} mengundang komputer ini untuk bergabung dengan dashboardnya."),
         ("You can undo this any time in Settings > Dashboard.", "Anda dapat membatalkan ini kapan saja di Pengaturan > Dashboard."),
+        ("A secure connection could not be established. Continue anyway?", "Koneksi aman tidak dapat dibuat. Tetap lanjutkan?"),
+        ("Connection not secure", "Koneksi tidak aman"),
+        ("Ticket submitted but attachment upload failed: ", "Tiket terkirim, tetapi unggahan lampiran gagal: "),
     ].iter().cloned().collect();
 }

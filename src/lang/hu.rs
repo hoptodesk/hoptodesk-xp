@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} meghívja ezt a számítógépet az irányítópultjához. A meglévő összekötés eltávolításra kerül."),
         ("{} is inviting this computer to join their dashboard.", "{} meghívja ezt a számítógépet az irányítópultjához."),
         ("You can undo this any time in Settings > Dashboard.", "Ezt bármikor visszavonhatja a Beállítások > Irányítópult menüpontban."),
+        ("A secure connection could not be established. Continue anyway?", "Nem sikerült biztonságos kapcsolatot létesíteni. Mégis folytatja?"),
+        ("Connection not secure", "A kapcsolat nem biztonságos"),
+        ("Ticket submitted but attachment upload failed: ", "A jegy elküldve, de a melléklet feltöltése nem sikerült: "),
     ].iter().cloned().collect();
 }

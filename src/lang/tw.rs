@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} 邀請此電腦加入其儀表板。現有關聯將被移除。"),
         ("{} is inviting this computer to join their dashboard.", "{} 邀請此電腦加入其儀表板。"),
         ("You can undo this any time in Settings > Dashboard.", "您可以隨時在 設定 > 儀表板 中撤銷此操作。"),
+        ("A secure connection could not be established. Continue anyway?", "無法建立安全連線。仍要繼續嗎？"),
+        ("Connection not secure", "連線不安全"),
+        ("Ticket submitted but attachment upload failed: ", "工單已送出，但附件上傳失敗："),
     ].iter().cloned().collect();
 }

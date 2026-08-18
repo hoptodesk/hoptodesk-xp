@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "Ο {} προσκαλεί αυτόν τον υπολογιστή να συμμετάσχει στον πίνακά του. Η υπάρχουσα σύνδεση θα αφαιρεθεί."),
         ("{} is inviting this computer to join their dashboard.", "Ο {} προσκαλεί αυτόν τον υπολογιστή να συμμετάσχει στον πίνακά του."),
         ("You can undo this any time in Settings > Dashboard.", "Μπορείτε να το αναιρέσετε ανά πάσα στιγμή στις Ρυθμίσεις > Πίνακας."),
+        ("A secure connection could not be established. Continue anyway?", "Δεν ήταν δυνατή η δημιουργία ασφαλούς σύνδεσης. Συνέχεια ούτως ή άλλως;"),
+        ("Connection not secure", "Η σύνδεση δεν είναι ασφαλής"),
+        ("Ticket submitted but attachment upload failed: ", "Το αίτημα στάλθηκε, αλλά η μεταφόρτωση του συνημμένου απέτυχε: "),
     ].iter().cloned().collect();
 }

@@ -317,8 +317,12 @@ pub fn run_cm_process(session_id: &str) {
     frame.run_app();
 
     unsafe {
-        if !CM_RESPONDED {
-            if let Some(ref sid) = CM_SESSION_ID {
+        if let Some(ref sid) = CM_SESSION_ID {
+            if CM_RESPONDED {
+                crate::config::write_log("[cm] Window closed during active session, signaling disconnect");
+                let _ = std::fs::remove_file(cm_accepted_path(sid));
+                let _ = std::fs::write(cm_rejected_path(sid), "disconnected");
+            } else {
                 let _ = std::fs::write(cm_rejected_path(sid), "rejected");
             }
         }

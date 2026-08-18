@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} kutsub seda arvutit oma armatuurlauale liituma. Olemasolev link eemaldatakse."),
         ("{} is inviting this computer to join their dashboard.", "{} kutsub seda arvutit oma armatuurlauale liituma."),
         ("You can undo this any time in Settings > Dashboard.", "Saate selle igal ajal tagasi võtta Seaded > Armatuurlaud."),
+        ("A secure connection could not be established. Continue anyway?", "Turvalist ühendust ei õnnestunud luua. Kas jätkata siiski?"),
+        ("Connection not secure", "Ühendus pole turvaline"),
+        ("Ticket submitted but attachment upload failed: ", "Pilet saadeti, kuid manuse üleslaadimine ebaõnnestus: "),
     ].iter().cloned().collect();
 }

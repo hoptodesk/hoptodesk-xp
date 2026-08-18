@@ -918,5 +918,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("{} is inviting this computer to join their dashboard instead. The existing link will be removed.", "{} kutsuu tätä tietokonetta liittymään koontinäyttöönsä. Olemassa oleva linkitys poistetaan."),
         ("{} is inviting this computer to join their dashboard.", "{} kutsuu tätä tietokonetta liittymään koontinäyttöönsä."),
         ("You can undo this any time in Settings > Dashboard.", "Voit perua tämän milloin tahansa kohdassa Asetukset > Koontinäyttö."),
+        ("A secure connection could not be established. Continue anyway?", "Suojattua yhteyttä ei voitu muodostaa. Jatketaanko silti?"),
+        ("Connection not secure", "Yhteys ei ole suojattu"),
+        ("Ticket submitted but attachment upload failed: ", "Tiketti lähetetty, mutta liitteen lataus epäonnistui: "),
     ].iter().cloned().collect();
 }
