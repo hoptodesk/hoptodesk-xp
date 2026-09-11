@@ -21,6 +21,7 @@ static mut CM_CHAT_LINES_READ: usize = 0;
 static mut CM_CHAT_PANEL_RESIZED: bool = false;
 static mut CM_ACCEPTED_TICK: u32 = 0;
 static mut CM_MINIMIZED: bool = false;
+static mut CM_INVITE: Option<(String, String, String)> = None;
 
 fn string_to_rgb(name: &str) -> String {
     let mut hash: u32 = 0;
@@ -154,6 +155,43 @@ pub fn cm_link_response_path(session_id: &str) -> PathBuf {
     cm_temp_dir().join(format!("hoptodesk_cm_{}.linkresp", session_id))
 }
 
+pub fn cm_invite_path(session_id: &str) -> PathBuf {
+    cm_temp_dir().join(format!("hoptodesk_cm_{}.invite", session_id))
+}
+
+pub fn write_invite_marker(session_id: &str, from_id: &str, from_name: &str, password: &str) {
+    let path = cm_invite_path(session_id);
+    let _ = std::fs::write(&path, format!("{}\n{}\n{}", from_id, from_name, password));
+    make_users_writable(&path);
+}
+
+fn read_invite_marker(session_id: &str) -> Option<(String, String, String)> {
+    let data = std::fs::read_to_string(cm_invite_path(session_id)).ok()?;
+    let mut lines = data.split('\n');
+    let from_id = lines.next()?.trim().to_string();
+    let from_name = lines.next().unwrap_or("").trim().to_string();
+    let password = lines.next().unwrap_or("").to_string();
+    if from_id.is_empty() {
+        return None;
+    }
+    Some((from_id, from_name, password))
+}
+
+fn accept_invite(session_id: &str, from_id: &str, password: &str) {
+    crate::config::write_log(&format!("[cm] User accepted the invitation from {}", from_id));
+    let mut peer_cfg = crate::config::PeerConfig::load(from_id);
+    peer_cfg.set_option("password", password);
+    peer_cfg.save(from_id);
+    let _ = std::fs::write(cm_accepted_path(session_id), "accepted");
+    let exe = std::env::current_exe().unwrap_or_default();
+    let _ = std::process::Command::new(&exe)
+        .args(["--connect", from_id])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
 pub fn cm_perm_path(session_id: &str) -> PathBuf {
     cm_temp_dir().join(format!("hoptodesk_cm_{}.perm", session_id))
 }
@@ -207,6 +245,7 @@ pub fn cleanup_cm_files(session_id: &str) {
     let _ = std::fs::remove_file(cm_ended_path(session_id));
     let _ = std::fs::remove_file(cm_link_request_path(session_id));
     let _ = std::fs::remove_file(cm_link_response_path(session_id));
+    let _ = std::fs::remove_file(cm_invite_path(session_id));
 }
 
 pub fn spawn_cm_process(session_id: &str) {
@@ -276,6 +315,10 @@ pub fn run_cm_process(session_id: &str) {
 
     let (peer_id, peer_name, peer_platform) = read_peer_info(session_id);
     crate::config::write_log(&format!("[cm] Peer: {} ({}) on {}", peer_name, peer_id, peer_platform));
+    let invite = read_invite_marker(session_id);
+    if invite.is_some() {
+        crate::config::write_log("[cm] This session is an invitation");
+    }
 
     sciter::set_options(sciter::RuntimeOptions::GfxLayer(sciter::GFX_LAYER::CPU)).ok();
 
@@ -298,7 +341,12 @@ pub fn run_cm_process(session_id: &str) {
         .replace("__PEER_NAME__", &safe_name)
         .replace("__PEER_PLATFORM__", &safe_platform)
         .replace("__AVATAR_COLOR__", &avatar_color)
-        .replace("__AVATAR_LETTER__", &safe_letter);
+        .replace("__AVATAR_LETTER__", &safe_letter)
+        .replace("__INVITE__", if invite.is_some() { "true" } else { "false" })
+        .replace(
+            "__INVITE_TEXT__",
+            &html_escape(&crate::lang::translate("Accept invite to connect to this computer?".to_string())),
+        );
 
     frame.load_html(html.as_bytes(), Some("this://app/cm.html"));
     frame.set_title("HopToDesk - Incoming Connection");
@@ -307,6 +355,7 @@ pub fn run_cm_process(session_id: &str) {
     crate::set_window_icon(hwnd);
     unsafe {
         CM_SESSION_ID = Some(session_id.to_string());
+        CM_INVITE = invite;
         CM_HWND = hwnd;
         CM_RESPONDED = false;
         CM_CHAT_LINES_READ = 0;
@@ -331,6 +380,9 @@ pub fn run_cm_process(session_id: &str) {
 
 fn show_connected_state(root: &sciter::Element) {
     crate::config::write_log("[cm] show_connected_state called");
+    if let Ok(Some(mut t)) = root.find_first("#connected-time") {
+        let _ = t.set_style_attribute("display", "block");
+    }
     if let Ok(Some(mut status)) = root.find_first("#cm-status") {
         let _ = status.set_text("");
         let _ = status.set_style_attribute("display", "none");
@@ -372,7 +424,7 @@ unsafe extern "system" fn cm_timer_callback(
         std::process::exit(0);
     }
 
-    if CM_RESPONDED && !cm_info_path(&session_id).exists() {
+    if !cm_info_path(&session_id).exists() {
         crate::config::write_log("[cm] Session ended (info file removed), exiting");
         std::process::exit(0);
     }
@@ -409,6 +461,10 @@ unsafe extern "system" fn cm_timer_callback(
         let txt = el.get_text();
         if !txt.is_empty() {
             let _ = el.set_text("");
+            if let Some((from_id, _from_name, password)) = CM_INVITE.take() {
+                accept_invite(&session_id, &from_id, &password);
+                std::process::exit(0);
+            }
             crate::config::write_log(&format!("[cm] User accepted connection"));
             let _ = std::fs::write(cm_accepted_path(&session_id), "accepted");
             CM_RESPONDED = true;

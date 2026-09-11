@@ -117,6 +117,120 @@
             font-size: 1.1em;
             font-weight: 600;
             color: #475569;
+            cursor: pointer;
+        }
+
+        #id-mode-toggle {
+            flow: horizontal;
+            border-spacing: 4px;
+            cursor: pointer;
+        }
+
+        #id-mode-toggle:hover {
+            color: #0D6EFD;
+        }
+
+        #id-mode-toggle svg {
+            width: 12px;
+            height: 12px;
+            margin: * 0;
+            color: #94A3B8;
+        }
+
+        #id-mode-toggle:hover svg {
+            color: #0D6EFD;
+        }
+
+        .id-row {
+            flow: horizontal;
+            border-spacing: 8px;
+        }
+
+        .id-row .idbox {
+            margin: * 0;
+            cursor: pointer;
+        }
+
+        .copy-pill {
+            flow: horizontal;
+            border-spacing: 4px;
+            background: #E3F2FD;
+            border-radius: 12px;
+            padding: 3px 12px 3px 9px;
+            cursor: pointer;
+            font-size: 0.65em;
+            font-weight: 700;
+            color: #1565C0;
+            margin: * 0;
+        }
+
+        .copy-pill:hover {
+            background: #BBDEFB;
+        }
+
+        .invite-pill {
+            flow: horizontal;
+            border-spacing: 4px;
+            background: #E8F0FE;
+            border-radius: 12px;
+            padding: 3px 12px 3px 9px;
+            cursor: pointer;
+            font-size: 0.65em;
+            font-weight: 700;
+            color: #2C8CFF;
+            margin: * 0;
+        }
+
+        .invite-pill:hover {
+            background: #D0E3FF;
+        }
+
+        .invite-pill svg {
+            width: 12px;
+            height: 12px;
+            margin: * 0;
+            color: #2C8CFF;
+        }
+
+        .copy-pill svg {
+            width: 12px;
+            height: 12px;
+            margin: * 0;
+            color: #1565C0;
+        }
+
+        .copy-pill div {
+            margin: * 0;
+        }
+
+        .copy-pill.copied, .copy-pill.copied:hover {
+            background: #E8F5E9;
+            color: #2E7D32;
+        }
+
+        .copy-pill.copied svg {
+            color: #2E7D32;
+        }
+
+        #ticket-icon {
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            margin: * 10px * 0;
+            color: #007BFF;
+            cursor: pointer;
+            text-align: center;
+        }
+
+        #ticket-icon svg {
+            width: 18px;
+            height: 18px;
+            margin: * 0;
+        }
+
+        #ticket-icon:hover {
+            color: #0056b3;
+            background: #F1F5F9;
         }
 
         .connect-buttons {
@@ -642,6 +756,23 @@
             cursor: pointer;
         }
 
+        .pw-dialog-header {
+            flow: horizontal;
+        }
+
+        .pw-random-row {
+            flow: horizontal;
+            border-spacing: 8px;
+        }
+
+        .pw-random-display {
+            font-family: Consolas, 'Courier New', Tahoma;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #475569;
+            margin: * 0;
+        }
+
         #about-overlay {
             display: none;
             position: fixed;
@@ -806,6 +937,18 @@
         html.darktheme .ctx-separator { background: #2a2a4a; }
         html.darktheme .empty-state { color: #64748B; }
         html.darktheme select { background: #1a1a2e; border-color: #475569; color: #E2E8F0; }
+        html.darktheme .copy-pill { background: #2a2a4a; color: #90CAF9; }
+        html.darktheme .copy-pill svg { color: #90CAF9; }
+        html.darktheme .copy-pill:hover { background: #334155; }
+        html.darktheme .invite-pill { background: #2a2a4a; color: #90CAF9; }
+        html.darktheme .invite-pill svg { color: #90CAF9; }
+        html.darktheme .invite-pill:hover { background: #334155; }
+        html.darktheme .copy-pill.copied, html.darktheme .copy-pill.copied:hover { background: #1b3a2a; color: #81C784; }
+        html.darktheme .copy-pill.copied svg { color: #81C784; }
+        html.darktheme #id-mode-toggle:hover, html.darktheme #id-mode-toggle:hover svg { color: #60A5FA; }
+        html.darktheme #ticket-icon { color: #60A5FA; }
+        html.darktheme #ticket-icon:hover { background: #2a2a4a; }
+        html.darktheme .pw-random-display { color: #CBD5E1; }
 
         /* Dialog overlay classes */
         .dialog-overlay { display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle; z-index:200; }
@@ -912,6 +1055,7 @@ function applyTranslations() {
             }
         } catch(e) {}
     }
+    try { refreshTitles(); if (deviceIdText != "") updateIdDisplay(); } catch(e) {}
 }
 
 self.ready = function() {
@@ -930,6 +1074,7 @@ self.ready = function() {
             <div class="brand-name">HopToDesk</div>
             <button class="button outline" id="install-btn" style="display:none; margin-left:16px;" data-tr="Install">Install</button>
             <div style="width: *;" />
+            <div id="ticket-icon" style="display:none"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M22 10V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v4c1.1 0 2 .9 2 2s-.9 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2z"/></svg></div>
             <div class="connect-status">
                 <span class="connect-status-icon status-connecting" id="status-icon"></span>
                 <span id="status-text" data-tr="Connecting...">Connecting...</span>
@@ -943,8 +1088,12 @@ self.ready = function() {
                     <div class="card-header"><span data-tr="This Device">This Device</span><div style="width:*;"></div><div class="settings-gear" id="settings-gear" title="Settings"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/></svg></div></div>
                     <div class="card-body">
                         <div>
-                            <div class="id-label" id="id-mode-toggle" data-tr="Your ID">Your ID</div>
-                            <div id="idbox" class="idbox">Loading...</div>
+                            <div class="id-label" id="id-mode-toggle"><div id="id-mode-label" data-tr="Your ID">Your ID</div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3l4 4-4 4"/><path d="M20 7H4"/><path d="M8 21l-4-4 4-4"/><path d="M4 17h16"/></svg></div>
+                            <div class="id-row">
+                                <div id="idbox" class="idbox">Loading...</div>
+                                <div id="copy-id" class="copy-pill"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg><div id="copy-id-label" data-tr="Copy">Copy</div></div>
+                                <div id="invite-pill" class="invite-pill"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg><div id="invite-pill-label" data-tr="Invite">Invite</div></div>
+                            </div>
                         </div>
                         <div>
                             <div class="pw-label" data-tr="Password">Password</div>
@@ -1019,6 +1168,10 @@ self.ready = function() {
                         <span class="setting-name" data-tr="TCP Tunneling">TCP Tunneling</span>
                         <div class="toggle-switch" id="sw-tunnel"><div class="toggle-knob"></div></div>
                     </div>
+                    <div class="setting-row" id="toggle-terminal">
+                        <span class="setting-name" data-tr="Remote Terminal">Remote Terminal</span>
+                        <div class="toggle-switch" id="sw-terminal"><div class="toggle-knob"></div></div>
+                    </div>
                     <div class="setting-row" id="toggle-remote-printing">
                         <span class="setting-name" data-tr="Remote Printing">Remote Printing</span>
                         <div class="toggle-switch" id="sw-remote-printing"><div class="toggle-knob"></div></div>
@@ -1092,18 +1245,32 @@ self.ready = function() {
 
     <div id="pw-settings-overlay">
         <div id="pw-settings-dialog">
-            <div class="pw-dialog-title" data-tr="Password Settings">Password Settings</div>
+            <div class="pw-dialog-header">
+                <div class="pw-dialog-title" data-tr="Password Settings">Password Settings</div>
+                <div style="width:*;"></div>
+                <span class="settings-close" id="pw-settings-close">X</span>
+            </div>
             <div class="pw-dialog-section">
                 <div class="pw-dialog-section-title" data-tr="Permanent Password">Permanent Password</div>
-                <input type="password" id="perm-pw1" placeholder="Password (min 6 chars)" />
-                <input type="password" id="perm-pw2" placeholder="Confirm password" />
+                <div class="dialog-label" data-tr="Password">Password</div>
+                <input type="password" id="perm-pw1" />
+                <div class="dialog-label" data-tr="Confirm">Confirm</div>
+                <input type="password" id="perm-pw2" />
                 <div class="pw-dialog-error" id="perm-pw-error"></div>
+                <div style="font-size:0.7em; color:#94A3B8;">Leave empty to clear permanent password.</div>
+            </div>
+            <div class="pw-dialog-section">
+                <div class="pw-dialog-section-title" data-tr="Random Password">Random Password</div>
+                <div class="pw-random-row">
+                    <div id="pw-random-display" class="pw-random-display"></div>
+                    <div style="width:*;"></div>
+                    <button class="ua-set-btn" id="pw-refresh" data-tr="Refresh">Refresh</button>
+                </div>
             </div>
             <div class="pw-dialog-buttons">
                 <button class="button outline" id="pw-settings-cancel" data-tr="Cancel">Cancel</button>
                 <button class="button" id="pw-settings-save" data-tr="Save">Save</button>
             </div>
-            <div style="font-size:0.7em; color:#94A3B8; padding-top:4px;">Leave empty to clear permanent password.</div>
         </div>
     </div>
 
@@ -1232,6 +1399,19 @@ self.ready = function() {
         </div>
     </div>
 
+    <div id="invite-overlay" class="dialog-overlay">
+        <div class="dialog-box">
+            <div class="dialog-title" data-tr="Invite A Device">Invite A Device</div>
+            <div class="dialog-text" data-tr="Input an ID to send a connection invitation for this device:">Input an ID to send a connection invitation for this device:</div>
+            <input type="text" id="invite-input" class="dialog-input" maxlength="12" data-tr-placeholder="Device ID to invite" placeholder="Device ID to invite" />
+            <div class="dialog-error" id="invite-error"></div>
+            <div class="dialog-buttons">
+                <button class="button outline" id="invite-cancel" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Cancel">Cancel</button>
+                <button class="button" id="invite-send" style="width:*; height:2em; border-radius:6px; font-size:0.85em;" data-tr="Send">Send</button>
+            </div>
+        </div>
+    </div>
+
     <div id="mac-overlay" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,0.4); text-align:center; vertical-align:middle; z-index:200;">
         <div style="width:280px; background:white; border-radius:10px; padding:16px; margin:* auto; flow:vertical; border-spacing:8px;">
             <div style="font-size:0.9em; font-weight:700; color:#1E293B;">Set MAC Address for WOL</div>
@@ -1275,6 +1455,9 @@ self.ready = function() {
     <div id="options-data" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="set-custom-api-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="set-invite-code-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="copy-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="refresh-pw-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="invite-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
 
     <!-- Debug log panel (hidden — change display:none to display:block to enable) -->
     <div id="debug-log" style="display:none; position:fixed; bottom:0; left:0; right:0; height:100px; background:#111; color:#0f0; font-family:Consolas,monospace; font-size:11px; overflow-y:scroll; padding:4px 8px; z-index:99999;"></div>
@@ -1294,8 +1477,18 @@ self.ready = function() {
             $(#perm-pw1).value = "";
             $(#perm-pw2).value = "";
             $(#perm-pw-error).text = "";
+            $(#pw-random-display).text = $(#pwbox).text;
             $(#pw-settings-overlay).style#display = "block";
             $(#perm-pw1).state.focus = true;
+        }
+
+        function closePwSettings() {
+            $(#pw-settings-overlay).style#display = "none";
+        }
+
+        function setRandomPassword(pw) {
+            $(#pwbox).text = pw;
+            $(#pw-random-display).text = pw;
         }
 
         function openSettings() {
@@ -1341,6 +1534,7 @@ self.ready = function() {
             updateToggle($(#sw-remote-restart), isDefaultOn(opts, "enable-remote-restart"));
             updateToggle($(#sw-tunnel), isDefaultOn(opts, "enable-tunnel"));
             updateToggle($(#sw-lan-discovery), isDefaultOn(opts, "enable-lan-discovery"));
+            updateToggle($(#sw-terminal), isDefaultOn(opts, "enable-terminal"));
             // Default-OFF toggles
             updateToggle($(#sw-remote-printing), isDefaultOff(opts, "enable-remote-printing"));
             updateToggle($(#sw-wol), isDefaultOff(opts, "enable-wol"));
@@ -1368,6 +1562,7 @@ self.ready = function() {
             updateToggle($(#sw-remote-restart), isDefaultOn(opts, "enable-remote-restart"));
             updateToggle($(#sw-tunnel), isDefaultOn(opts, "enable-tunnel"));
             updateToggle($(#sw-lan-discovery), isDefaultOn(opts, "enable-lan-discovery"));
+            updateToggle($(#sw-terminal), isDefaultOn(opts, "enable-terminal"));
             updateToggle($(#sw-remote-printing), isDefaultOff(opts, "enable-remote-printing"));
             updateToggle($(#sw-wol), isDefaultOff(opts, "enable-wol"));
             updateToggle($(#sw-direct-server), isDefaultOff(opts, "direct-server"));
@@ -1378,7 +1573,16 @@ self.ready = function() {
             $(#2fa-display).text = tfaOn ? tr("On") : tr("Off");
         }
 
+        function setDashboardId(dashId) {
+            var opts = getOptions();
+            opts["dashboard_user_id"] = dashId;
+            try { $(#options-data).text = JSON.stringify(opts); } catch(e) {}
+            updateDashboardDisplay(dashId);
+        }
+
         function updateDashboardDisplay(dashId) {
+            var linked = dashId && dashId.length > 0 && dashId != "pending...";
+            $(#ticket-icon).style#display = linked ? "block" : "none";
             if (dashId && dashId.length > 0) {
                 $(#dashboard-display).text = tr("Linked");
                 $(#dashboard-arrow).text = dashId.substr(0, 10) + "..";
@@ -1414,14 +1618,50 @@ self.ready = function() {
         function updateIdDisplay() {
             var opts = getOptions();
             var localIp = opts["local_ip"] || "";
+            if (localIp == "0.0.0.0") localIp = "";
             var idText = opts["id_formatted"] || deviceIdText;
             var preferIp = opts["show-local-ip"] == "Y";
             var showIp = preferIp && localIp != "";
             var label = $(#id-mode-toggle);
-            label.text = showIp ? tr("Your IP") : tr("Your ID");
+            $(#id-mode-label).text = showIp ? tr("Your IP") : tr("Your ID");
             label.attributes["title"] = showIp ? tr("Switch to ID") : (preferIp ? tr("No local IP available - showing ID") : tr("Switch to local IP"));
             $(#idbox).text = showIp ? localIp : idText;
-            $(#idbox).attributes["title"] = showIp ? tr("Your local IP address - share this for direct LAN connections") : "";
+            $(#idbox).attributes["title"] = showIp ? tr("Your local IP address - share this for direct LAN connections") : tr("Your unique device ID - share this with others so they can connect to you");
+            $(#copy-id).attributes["title"] = showIp ? tr("Copy your local IP to clipboard") : tr("Copy your device ID to clipboard so others can connect to you");
+            $(#invite-pill).style#display = showIp ? "none" : "block";
+        }
+
+        function refreshTitles() {
+            $(#pwbox).attributes["title"] = tr("Password (Click to Copy)");
+            $(#ticket-icon).attributes["title"] = tr("Open support tickets");
+            $(#invite-pill).attributes["title"] = tr("Send a connection invitation to another device by entering its ID");
+        }
+
+        function copyText(text) {
+            var value = ((text || "") + "").replace(/ /g, "");
+            if (!value) return;
+            $(#copy-flag).text = value;
+        }
+
+        function copyIdToClipboard() {
+            copyText($(#idbox).text);
+        }
+
+        function setCopyLabel(key, copied) {
+            var pill = $(#copy-id);
+            $(#copy-id-label).text = tr(key);
+            if (copied) pill.attributes.addClass("copied");
+            else pill.attributes.removeClass("copied");
+        }
+
+        function showCopied() {
+            setCopyLabel("Copied", true);
+            $(#copy-id).timer(1500, function() { setCopyLabel("Copy", false); });
+        }
+
+        function showCopyFailed() {
+            setCopyLabel("Copy failed", true);
+            $(#copy-id).timer(2000, function() { setCopyLabel("Copy", false); });
         }
 
         try { $(#id-mode-toggle).onClick = function() {
@@ -1429,6 +1669,39 @@ self.ready = function() {
             setOptionAndUpdate("show-local-ip", opts["show-local-ip"] == "Y" ? "" : "Y");
             updateIdDisplay();
         }; } catch(e) { dbg("FAIL: id-mode-toggle: " + e); }
+
+        try { $(#copy-id).onClick = function() { copyIdToClipboard(); }; dbg("OK: copy-id"); } catch(e) { dbg("FAIL: copy-id: " + e); }
+        try { $(#idbox).onClick = function() { copyIdToClipboard(); }; dbg("OK: idbox-copy"); } catch(e) { dbg("FAIL: idbox-copy: " + e); }
+        try { $(#pwbox).onClick = function() { copyText($(#pwbox).text); }; dbg("OK: pwbox-copy"); } catch(e) { dbg("FAIL: pwbox-copy: " + e); }
+        try { $(#ticket-icon).onClick = function() { $(#open-ticket-flag).text = "1"; }; dbg("OK: ticket-icon"); } catch(e) { dbg("FAIL: ticket-icon: " + e); }
+
+        function openInviteDialog() {
+            $(#invite-input).value = "";
+            $(#invite-error).text = "";
+            $(#invite-overlay).style#display = "block";
+            $(#invite-input).state.focus = true;
+        }
+
+        function closeInviteDialog() {
+            $(#invite-overlay).style#display = "none";
+        }
+
+        function sendInvite() {
+            var id = ($(#invite-input).value || "").replace(/ /g, "");
+            if (!id) return;
+            if (isOwnId(id)) { $(#invite-error).text = tr("Can not invite yourself."); return; }
+            if (id.length < 9 || id.length > 10) { $(#invite-error).text = tr("Please enter a valid device ID."); return; }
+            if (!/^[0-9]+$/.test(id)) { $(#invite-error).text = tr("Device ID must contain only numbers (0-9)."); return; }
+            $(#invite-flag).text = id;
+            closeInviteDialog();
+        }
+
+        try { $(#invite-pill).onClick = function() { openInviteDialog(); }; dbg("OK: invite-pill"); } catch(e) { dbg("FAIL: invite-pill: " + e); }
+        try { $(#invite-cancel).onClick = function() { closeInviteDialog(); }; dbg("OK: invite-cancel"); } catch(e) { dbg("FAIL: invite-cancel: " + e); }
+        try { $(#invite-send).onClick = function() { sendInvite(); }; dbg("OK: invite-send"); } catch(e) { dbg("FAIL: invite-send: " + e); }
+        try { $(#invite-input).onKey = function(evt) {
+            if (evt.keyCode == Event.VK_RETURN) { sendInvite(); return true; }
+        }; dbg("OK: invite-enter"); } catch(e) { dbg("FAIL: invite-enter: " + e); }
 
         try {
             var installBtn = $(#install-btn);
@@ -1476,6 +1749,7 @@ self.ready = function() {
         makeDefaultOnToggle("#toggle-remote-restart", "#sw-remote-restart", "enable-remote-restart");
         makeDefaultOnToggle("#toggle-tunnel", "#sw-tunnel", "enable-tunnel");
         makeDefaultOnToggle("#toggle-lan-discovery", "#sw-lan-discovery", "enable-lan-discovery");
+        makeDefaultOnToggle("#toggle-terminal", "#sw-terminal", "enable-terminal");
 
         // --- Toggle handlers (default-OFF options: Y/N) ---
         function makeDefaultOffToggle(rowId, swId, optionKey) {
@@ -1820,28 +2094,31 @@ self.ready = function() {
         }; dbg("OK: link-source"); } catch(e) { dbg("FAIL: link-source: " + e); }
 
         try { $(#pw-settings-save).onClick = function() {
-            var pw1 = $(#perm-pw1).value || "";
-            var pw2 = $(#perm-pw2).value || "";
+            var pw1 = ($(#perm-pw1).value || "").trim();
+            var pw2 = ($(#perm-pw2).value || "").trim();
             if (pw1.length == 0 && pw2.length == 0) {
                 $(#set-perm-pw-flag).text = "__CLEAR__";
-                $(#pw-settings-overlay).style#display = "none";
+                closePwSettings();
                 return;
             }
             if (pw1.length < 6) {
-                $(#perm-pw-error).text = tr("Password must be at least 6 characters");
+                $(#perm-pw-error).text = tr("Too short, at least 6 characters.");
                 return;
             }
             if (pw1 != pw2) {
-                $(#perm-pw-error).text = tr("Passwords do not match");
+                $(#perm-pw-error).text = tr("The confirmation is not identical.");
                 return;
             }
             $(#set-perm-pw-flag).text = pw1;
-            $(#pw-settings-overlay).style#display = "none";
+            closePwSettings();
         }; dbg("OK: pw-settings-save"); } catch(e) { dbg("FAIL: pw-settings-save: " + e); }
 
-        try { $(#pw-settings-cancel).onClick = function() {
-            $(#pw-settings-overlay).style#display = "none";
-        }; dbg("OK: pw-settings-cancel"); } catch(e) { dbg("FAIL: pw-settings-cancel: " + e); }
+        try { $(#pw-settings-cancel).onClick = function() { closePwSettings(); }; dbg("OK: pw-settings-cancel"); } catch(e) { dbg("FAIL: pw-settings-cancel: " + e); }
+        try { $(#pw-settings-close).onClick = function() { closePwSettings(); }; dbg("OK: pw-settings-close"); } catch(e) { dbg("FAIL: pw-settings-close: " + e); }
+        try { $(#pw-settings-overlay).onClick = function(evt) {
+            if (evt && evt.target === $(#pw-settings-overlay)) closePwSettings();
+        }; dbg("OK: pw-settings-overlay"); } catch(e) { dbg("FAIL: pw-settings-overlay: " + e); }
+        try { $(#pw-refresh).onClick = function() { $(#refresh-pw-flag).text = "1"; }; dbg("OK: pw-refresh"); } catch(e) { dbg("FAIL: pw-refresh: " + e); }
 
         function isOwnId(id) {
             var mine = ((getOptions()["id_formatted"] || deviceIdText || "") + "").replace(/ /g, "");
@@ -1938,6 +2215,8 @@ self.ready = function() {
         var ctx_peer_id = "";
         var ctx_is_fav = false;
         var ctx_relay = false;
+        var ctx_alias = "";
+        var dialog_peer_id = "";
 
         function updateCtxRelayItem() {
             $(#ctx-relay).text = (ctx_relay ? "✓ " : "") + tr("Always connect via relay");
@@ -1972,6 +2251,8 @@ self.ready = function() {
 
             ctx_relay = item.attributes["data-relay"] == "Y";
             updateCtxRelayItem();
+            ctx_alias = item.attributes["data-alias"] || "";
+            $(#ctx-forget-pw).style#display = item.attributes["data-haspw"] == "Y" ? "block" : "none";
 
             _ctxOverflowEls = [];
             var p = $(#ctx-menu-overlay).parent;
@@ -2049,6 +2330,7 @@ self.ready = function() {
         }; } catch(e) { dbg("FAIL: ctx-relay: " + e); }
         try { $(#ctx-set-mac).onClick = function() {
             if (!ctx_peer_id) { hideCtxMenu(); return; }
+            dialog_peer_id = ctx_peer_id;
             hideCtxMenu();
             $(#mac-input).value = "";
             $(#mac-error).text = "";
@@ -2057,8 +2339,9 @@ self.ready = function() {
         }; } catch(e) { dbg("FAIL: ctx-set-mac: " + e); }
         try { $(#ctx-rename).onClick = function() {
             if (!ctx_peer_id) { hideCtxMenu(); return; }
+            dialog_peer_id = ctx_peer_id;
             hideCtxMenu();
-            $(#rename-input).value = "";
+            $(#rename-input).value = ctx_alias;
             $(#rename-overlay).style#display = "block";
             $(#rename-input).state.focus = true;
         }; } catch(e) { dbg("FAIL: ctx-rename: " + e); }
@@ -2084,9 +2367,9 @@ self.ready = function() {
             $(#rename-overlay).style#display = "none";
         }; } catch(e) { dbg("FAIL: rename-cancel: " + e); }
         try { $(#rename-save).onClick = function() {
-            var alias = $(#rename-input).value || "";
-            if (ctx_peer_id) {
-                $(#rename-peer-flag).text = ctx_peer_id + "|" + alias;
+            var alias = ($(#rename-input).value || "").trim();
+            if (dialog_peer_id && alias) {
+                $(#rename-peer-flag).text = dialog_peer_id + "|" + alias;
             }
             $(#rename-overlay).style#display = "none";
         }; } catch(e) { dbg("FAIL: rename-save: " + e); }
@@ -2101,8 +2384,8 @@ self.ready = function() {
                 $(#mac-error).text = "Invalid MAC format (use AA:BB:CC:DD:EE:FF)";
                 return;
             }
-            if (ctx_peer_id) {
-                $(#set-mac-flag).text = ctx_peer_id + "|" + mac;
+            if (dialog_peer_id) {
+                $(#set-mac-flag).text = dialog_peer_id + "|" + mac;
             }
             $(#mac-overlay).style#display = "none";
         }; } catch(e) { dbg("FAIL: mac-save: " + e); }

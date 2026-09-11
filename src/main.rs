@@ -19,6 +19,7 @@ mod lang;
 mod mcp_server;
 mod network;
 mod platform;
+mod privacy;
 mod protocol;
 mod recording;
 mod remote;
@@ -68,6 +69,7 @@ pub fn set_window_icon(hwnd: sciter::types::HWINDOW) {
 static mut TIMER_STATE: Option<Arc<Mutex<ui_handler::AppState>>> = None;
 static mut TIMER_HWND: sciter::types::HWINDOW = std::ptr::null_mut();
 static mut TIMER_TICK: u32 = 0;
+static mut LAST_DASHBOARD_ID: Option<String> = None;
 static mut INSTALL_PARENT_PID: u32 = 0;
 
 #[cfg(target_os = "windows")]
@@ -514,6 +516,11 @@ fn main() {
                 remote::run_connect_process_ex(&target_id, &saved_password, is_ft, switch_uuid.as_deref());
                 std::process::exit(0);
             }
+            "--invite" if args.len() >= 3 => {
+                let target_id = args[2].replace(' ', "");
+                remote::run_invite_process(&target_id);
+                std::process::exit(0);
+            }
             "--cm" => {
 
                 let session_id = args.get(2)
@@ -744,7 +751,6 @@ fn build_ui_translations() -> String {
         "Your local IP address - share this for direct LAN connections",
         "Connecting...", "Ready", "Not connected",
         "Website", "Privacy Statement", "OK", "Version",
-        "Password must be at least 6 characters", "Passwords do not match",
         "Enable", "Disable", "Verify", "On", "Off",
         "Enter your 6-digit code", "2FA enabled successfully",
         "Invalid code, please try again", "2FA has been disabled",
@@ -756,6 +762,18 @@ fn build_ui_translations() -> String {
         "Hostname", "Username", "Type",
         "HopToDesk Network (Default)", "Custom",
         "Incoming Connections Off.",
+        "Invite", "Invite A Device", "Send", "Device ID to invite",
+        "Input an ID to send a connection invitation for this device:",
+        "Send a connection invitation to another device by entering its ID",
+        "Can not invite yourself.", "Please enter a valid device ID.",
+        "Device ID must contain only numbers (0-9).",
+        "Copy", "Copied", "Copy failed", "Remote Terminal",
+        "Random Password", "Refresh", "Confirm", "Close",
+        "Password (Click to Copy)", "Open support tickets",
+        "Copy your device ID to clipboard so others can connect to you",
+        "Copy your local IP to clipboard",
+        "Your unique device ID - share this with others so they can connect to you",
+        "Too short, at least 6 characters.", "The confirmation is not identical.",
     ];
 
     let mut parts = Vec::new();
@@ -886,6 +904,7 @@ fn run_main_ui() {
             "enable-wol": cfg2.get_option("enable-wol"),
             "direct-server": cfg2.get_option("direct-server"),
             "enable-lan-discovery": cfg2.get_option("enable-lan-discovery"),
+            "enable-terminal": cfg2.get_option("enable-terminal"),
             "stop-service": cfg2.get_option("stop-service"),
             "allow-darktheme": cfg2.get_option("allow-darktheme"),
             "dashboard_user_id": cfg2.get_option("dashboard_user_id"),
@@ -896,6 +915,9 @@ fn run_main_ui() {
         }).to_string();
         (pj, oj)
     };
+    unsafe {
+        LAST_DASHBOARD_ID = Some(config::Config2::load().get_option("dashboard_user_id"));
+    }
 
     let is_installed_now = crate::install::is_installed();
     let install_style = if is_installed_now {
@@ -968,20 +990,24 @@ unsafe extern "system" fn main_timer_callback(
         Err(_) => return,
     };
 
-    let signal_status = {
+    let (signal_status, incoming_off) = {
         let s = match state.lock() {
             Ok(s) => s,
             Err(_) => return,
         };
         let sig = s.signal_state.lock().unwrap_or_else(|e| e.into_inner());
-        sig.status.clone()
+        (sig.status.clone(), s.config2.get_option("stop-service") == "Y")
     };
 
     if let Ok(Some(mut icon)) = root.find_first("#status-icon") {
-        let (css_class, status_key) = match signal_status.as_str() {
-            "online" => ("connect-status-icon status-online", "Ready"),
-            "connecting" => ("connect-status-icon status-connecting", "Connecting..."),
-            _ => ("connect-status-icon status-offline", "Not connected"),
+        let (css_class, status_key) = if incoming_off {
+            ("connect-status-icon status-offline", "Incoming Connections Off.")
+        } else {
+            match signal_status.as_str() {
+                "online" => ("connect-status-icon status-online", "Ready"),
+                "connecting" => ("connect-status-icon status-connecting", "Connecting..."),
+                _ => ("connect-status-icon status-offline", "Not connected"),
+            }
         };
         let _ = icon.set_attribute("class", css_class);
         if let Ok(Some(mut txt)) = root.find_first("#status-text") {
@@ -1002,6 +1028,19 @@ unsafe extern "system" fn main_timer_callback(
         if pw_changed {
             if let Ok(Some(mut pwbox)) = root.find_first("#pwbox") {
                 let _ = pwbox.set_text(&disk_cfg.password);
+            }
+        }
+
+        let disk_cfg2 = config::Config2::load();
+        let dash_id = disk_cfg2.get_option("dashboard_user_id");
+        if let Ok(mut s) = state.lock() {
+            s.config2 = disk_cfg2;
+        }
+        if LAST_DASHBOARD_ID.as_deref() != Some(dash_id.as_str()) {
+            LAST_DASHBOARD_ID = Some(dash_id.clone());
+            if let Ok(Some(body)) = root.find_first("body") {
+                let escaped = dash_id.replace('\\', "\\\\").replace('\'', "\\'");
+                let _ = body.eval_script(&format!("try {{ setDashboardId('{}'); }} catch(e) {{}}", escaped));
             }
         }
     }
@@ -1346,6 +1385,58 @@ unsafe extern "system" fn main_timer_callback(
         }
     }
 
+    if let Ok(Some(mut el)) = root.find_first("#invite-flag") {
+        let target = el.get_text();
+        if !target.is_empty() {
+            let _ = el.set_text("");
+            let target_id = target.replace(' ', "");
+            let exe = std::env::current_exe().unwrap_or_default();
+            crate::config::write_log(&format!("[UI] Spawning: {} --invite {}", exe.display(), target_id));
+            if let Err(e) = std::process::Command::new(&exe)
+                .args(["--invite", &target_id])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                crate::config::write_log(&format!("[UI] Spawn failed: {}", e));
+            }
+        }
+    }
+
+    if let Ok(Some(mut el)) = root.find_first("#copy-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            let copied = crate::platform::set_clipboard_text(&text);
+            if let Ok(Some(body)) = root.find_first("body") {
+                let _ = body.eval_script(if copied {
+                    "try { showCopied(); } catch(e) {}"
+                } else {
+                    "try { showCopyFailed(); } catch(e) {}"
+                });
+            }
+        }
+    }
+
+    if let Ok(Some(mut el)) = root.find_first("#refresh-pw-flag") {
+        let text = el.get_text();
+        if !text.is_empty() {
+            let _ = el.set_text("");
+            let new_pw = config::generate_password();
+            if let Ok(mut s) = state.lock() {
+                s.config.password = new_pw.clone();
+                s.config.save();
+            }
+            if let Ok(Some(mut pwbox)) = root.find_first("#pwbox") {
+                let _ = pwbox.set_text(&new_pw);
+            }
+            if let Ok(Some(body)) = root.find_first("body") {
+                let _ = body.eval_script(&format!("try {{ setRandomPassword('{}'); }} catch(e) {{}}", new_pw));
+            }
+        }
+    }
+
     if let Ok(Some(mut el)) = root.find_first("#open-ticket-flag") {
         let text = el.get_text();
         if !text.is_empty() {
@@ -1443,7 +1534,7 @@ unsafe extern "system" fn main_timer_callback(
                         };
 
                         items_html.push_str(&format!(
-                            "<div class=\"session-item\" data-id=\"{}\" data-relay=\"{}\">\
+                            "<div class=\"session-item\" data-id=\"{}\" data-relay=\"{}\" data-alias=\"{}\" data-haspw=\"{}\">\
                                 <div class=\"session-tile\">{}<div class=\"session-caption\">{}</div></div>\
                                 <div class=\"{}\">{}</div>\
                                 <div class=\"session-strip\">\
@@ -1451,7 +1542,7 @@ unsafe extern "system" fn main_timer_callback(
                                     <div class=\"session-menu\">{}</div>\
                                 </div>\
                             </div>",
-                            p.id, peer_cfg.get_option("force-always-relay"), platform_card_svg(&p.platform), crate::cm::html_escape(&caption), fav_class, heart, crate::cm::html_escape(&display_name), CARD_MENU_DOTS
+                            p.id, peer_cfg.get_option("force-always-relay"), crate::cm::html_escape(&peer_cfg.alias), if peer_cfg.get_option("password").is_empty() { "" } else { "Y" }, platform_card_svg(&p.platform), crate::cm::html_escape(&caption), fav_class, heart, crate::cm::html_escape(&display_name), CARD_MENU_DOTS
                         ));
                     }
                 }

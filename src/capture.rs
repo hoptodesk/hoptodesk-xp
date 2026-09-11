@@ -70,6 +70,11 @@ impl CapturerGDI {
 
     pub fn frame(&self, data: &mut Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
         unsafe {
+            let rop = if crate::privacy::capture_layered_windows() {
+                SRCCOPY | CAPTUREBLT
+            } else {
+                SRCCOPY
+            };
             let res = BitBlt(
                 self.dc,
                 0,
@@ -79,7 +84,7 @@ impl CapturerGDI {
                 self.screen_dc,
                 0,
                 0,
-                SRCCOPY | CAPTUREBLT,
+                rop,
             );
             if res == 0 {
                 return Err("Failed to copy screen to Windows buffer".into());

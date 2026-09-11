@@ -902,5 +902,6 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Your IP", ""),
         ("Your local IP address - share this for direct LAN connections", ""),
         ("{} is inviting this computer to join their dashboard.", ""),
+        ("Copy failed", ""),
     ].iter().cloned().collect();
 }

@@ -111,11 +111,12 @@ pub fn run_direct_server(
                     let password = password.clone();
                     let pk = pk.clone();
                     std::thread::spawn(move || {
+                        let direct_addr = tcp_stream.local_addr().ok().map(|a| a.ip().to_string());
                         let mut stream = FramedStream::from_tcp(tcp_stream);
                         stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
                         stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
                         let stop = Arc::new(AtomicBool::new(false));
-                        if let Err(e) = run_session_public(&mut stream, &my_id, &password, &pk, &stop) {
+                        if let Err(e) = run_session_public(&mut stream, &my_id, &password, &pk, direct_addr, &stop) {
                             crate::config::write_log(&format!("[direct] Session error: {}", e));
                         }
                         crate::config::write_log("[direct] Session ended");
@@ -156,7 +157,7 @@ pub fn accept_connection(
                 stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
                 stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
 
-                if let Err(e) = run_session_public(&mut stream, my_id, password, pk, &stop) {
+                if let Err(e) = run_session_public(&mut stream, my_id, password, pk, None, &stop) {
                     crate::config::write_log(&format!("[server] Session error: {}", e));
                 }
                 crate::config::write_log(&format!("[server] Session ended"));
@@ -182,6 +183,7 @@ pub fn run_session_public(
     my_id: &str,
     password: &str,
     pk: &[u8],
+    direct_addr: Option<String>,
     stop: &Arc<AtomicBool>,
 ) -> io::Result<()> {
 
@@ -193,7 +195,7 @@ pub fn run_session_public(
 
     {
         let mut id_pk = message_proto::IdPk::new();
-        id_pk.id = my_id.to_string();
+        id_pk.id = direct_addr.unwrap_or_else(|| my_id.to_string());
         id_pk.pk = eph_pk.to_vec().into();
         let id_pk_bytes = id_pk.write_to_bytes().map_err(io_err)?;
 
@@ -296,21 +298,31 @@ pub fn run_session_public(
     let login_deadline = Instant::now() + Duration::from_secs(120);
     let mut login_attempt = 0;
     let mut approval_cm_session: Option<String> = None;
+    let mut last_login_keepalive = Instant::now();
     loop {
         if Instant::now() >= login_deadline {
             crate::config::write_log(&format!("[server] Login timeout (120s)"));
             return Ok(());
         }
 
+        if last_login_keepalive.elapsed() >= Duration::from_secs(3) {
+            last_login_keepalive = Instant::now();
+            let mut td = message_proto::TestDelay::new();
+            td.from_client = false;
+            let mut keepalive = message_proto::Message::new();
+            keepalive.set_test_delay(td);
+            if stream.send_msg(&keepalive.write_to_bytes().map_err(io_err)?).is_err() {
+                crate::config::write_log("[server] Viewer left during login");
+                return Ok(());
+            }
+        }
+
         let data = match stream.recv_msg() {
             Ok(d) => d,
             Err(e) => {
-
-                let msg = format!("{}", e);
-                if msg.contains("timed out") || msg.contains("WouldBlock") {
+                if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock {
                     continue;
                 }
-
                 crate::config::write_log(&format!("[server] Login recv error: {}", e));
                 return Err(e);
             }
@@ -325,7 +337,9 @@ pub fn run_session_public(
 
         match &msg.union {
             Some(message_proto::message::Union::TestDelay(td)) => {
-
+                if td.from_client {
+                    continue;
+                }
                 let mut resp = message_proto::TestDelay::new();
                 resp.time = td.time;
                 resp.last_delay = td.last_delay;
@@ -357,6 +371,10 @@ pub fn run_session_public(
                     crate::config::write_log("[server] SwitchSidesResponse missing LoginRequest");
                     continue;
                 }
+            }
+            Some(message_proto::message::Union::InviteRequest(req)) => {
+                let req = req.clone();
+                return handle_invite_request(stream, &req);
             }
             _ => {
                 crate::config::write_log(&format!("[server] Ignoring non-login message during auth"));
@@ -417,8 +435,8 @@ pub fn run_session_public(
             loop {
                 if Instant::now() >= cm_deadline {
                     crate::config::write_log(&format!("[server] CM timeout — rejecting"));
-                    cm::signal_cm_ended(&session_id);
                     cm::cleanup_cm_files(&session_id);
+                    cm::signal_cm_ended(&session_id);
                     let mut resp = message_proto::LoginResponse::new();
                     resp.union = Some(message_proto::login_response::Union::Error(
                         "Connection rejected (timeout)".to_string(),
@@ -429,17 +447,42 @@ pub fn run_session_public(
                     return Ok(());
                 }
 
-                if let Ok(data) = stream.recv_msg() {
+                if last_login_keepalive.elapsed() >= Duration::from_secs(3) {
+                    last_login_keepalive = Instant::now();
+                    let mut td = message_proto::TestDelay::new();
+                    td.from_client = false;
+                    let mut keepalive = message_proto::Message::new();
+                    keepalive.set_test_delay(td);
+                    if stream.send_msg(&keepalive.write_to_bytes().map_err(io_err)?).is_err() {
+                        crate::config::write_log("[server] Viewer left while CM open");
+                        cm::cleanup_cm_files(&session_id);
+                        cm::signal_cm_ended(&session_id);
+                        return Ok(());
+                    }
+                }
+
+                let recv = stream.recv_msg();
+                if let Err(ref e) = recv {
+                    if e.kind() != io::ErrorKind::TimedOut && e.kind() != io::ErrorKind::WouldBlock {
+                        crate::config::write_log(&format!("[server] Viewer left while CM open, closing approval: {}", e));
+                        cm::cleanup_cm_files(&session_id);
+                        cm::signal_cm_ended(&session_id);
+                        return Ok(());
+                    }
+                }
+                if let Ok(data) = recv {
                     if let Ok(msg) = message_proto::Message::parse_from_bytes(&data) {
                         match &msg.union {
                             Some(message_proto::message::Union::TestDelay(td)) => {
-                                let mut resp = message_proto::TestDelay::new();
-                                resp.time = td.time;
-                                resp.last_delay = td.last_delay;
-                                resp.from_client = false;
-                                let mut reply = message_proto::Message::new();
-                                reply.set_test_delay(resp);
-                                let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
+                                if !td.from_client {
+                                    let mut resp = message_proto::TestDelay::new();
+                                    resp.time = td.time;
+                                    resp.last_delay = td.last_delay;
+                                    resp.from_client = false;
+                                    let mut reply = message_proto::Message::new();
+                                    reply.set_test_delay(resp);
+                                    let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
+                                }
                             }
                             Some(message_proto::message::Union::LoginRequest(new_lr)) => {
 
@@ -488,8 +531,8 @@ pub fn run_session_public(
                     }
                     Some(false) => {
                         crate::config::write_log(&format!("[server] CM rejected"));
-                        cm::signal_cm_ended(&session_id);
                         cm::cleanup_cm_files(&session_id);
+                        cm::signal_cm_ended(&session_id);
                         let mut resp = message_proto::LoginResponse::new();
                         resp.union = Some(message_proto::login_response::Union::Error(
                             "Connection rejected".to_string(),
@@ -679,7 +722,7 @@ pub fn run_session_public(
     }
 
     let mut features = message_proto::Features::new();
-    features.privacy_mode = false;
+    features.privacy_mode = true;
     features.terminal = cfg2_perms.get_option("enable-terminal") != "N";
     peer_info.features = protobuf::MessageField::some(features);
 
@@ -734,8 +777,8 @@ pub fn run_session_public(
 
         let result = run_file_transfer_loop(stream, stop);
         set_cm_session(None);
-        cm::signal_cm_ended(&cm_session_id);
         cm::cleanup_cm_files(&cm_session_id);
+        cm::signal_cm_ended(&cm_session_id);
         rotate_password_if_needed();
         return result;
     }
@@ -745,8 +788,8 @@ pub fn run_session_public(
 
         let result = crate::terminal_service::run_terminal_loop(stream, stop);
         set_cm_session(None);
-        cm::signal_cm_ended(&cm_session_id);
         cm::cleanup_cm_files(&cm_session_id);
+        cm::signal_cm_ended(&cm_session_id);
         rotate_password_if_needed();
         return result;
     }
@@ -756,8 +799,8 @@ pub fn run_session_public(
         crate::config::write_log(&format!("[server] Port forward session -> {}:{}", target_host, target_port));
         let result = run_port_forward_loop(stream, &target_host, target_port, stop);
         set_cm_session(None);
-        cm::signal_cm_ended(&cm_session_id);
         cm::cleanup_cm_files(&cm_session_id);
+        cm::signal_cm_ended(&cm_session_id);
         rotate_password_if_needed();
         return result;
     }
@@ -771,11 +814,68 @@ pub fn run_session_public(
     platform::set_prevent_sleep(false);
 
     set_cm_session(None);
-    cm::signal_cm_ended(&cm_session_id);
     cm::cleanup_cm_files(&cm_session_id);
+    cm::signal_cm_ended(&cm_session_id);
     rotate_password_if_needed();
 
     result
+}
+
+fn handle_invite_request(stream: &mut FramedStream, req: &message_proto::InviteRequest) -> io::Result<()> {
+    crate::config::write_log(&format!(
+        "[server] Invitation from {} ({}), asking the user",
+        req.from_id, req.from_name
+    ));
+    let session_id = generate_random_string(8);
+    cm::write_invite_marker(&session_id, &req.from_id, &req.from_name, &req.password_to_connect);
+    cm::write_cm_info(&session_id, &req.from_id, &req.from_name, "Invite");
+    cm::spawn_cm_process(&session_id);
+
+    stream.set_read_timeout(Some(Duration::from_millis(200))).ok();
+    let deadline = Instant::now() + CM_TIMEOUT;
+    let mut last_keepalive = Instant::now();
+    let mut answer = None;
+    while answer.is_none() && Instant::now() < deadline {
+        if last_keepalive.elapsed() >= Duration::from_secs(3) {
+            last_keepalive = Instant::now();
+            let mut td = message_proto::TestDelay::new();
+            td.from_client = false;
+            let mut keepalive = message_proto::Message::new();
+            keepalive.set_test_delay(td);
+            if stream.send_msg(&keepalive.write_to_bytes().map_err(io_err)?).is_err() {
+                crate::config::write_log("[server] Inviter went away before the user answered");
+                break;
+            }
+        }
+        if let Err(e) = stream.recv_msg() {
+            if e.kind() != io::ErrorKind::TimedOut && e.kind() != io::ErrorKind::WouldBlock {
+                crate::config::write_log(&format!("[server] Inviter disconnected: {}", e));
+                break;
+            }
+        }
+        answer = cm::check_cm_response(&session_id);
+        if answer.is_none() {
+            std::thread::sleep(CM_POLL_INTERVAL);
+        }
+    }
+    cm::cleanup_cm_files(&session_id);
+    cm::signal_cm_ended(&session_id);
+
+    let accepted = answer == Some(true);
+    crate::config::write_log(&format!(
+        "[server] Invitation from {} {}",
+        req.from_id,
+        if accepted { "accepted" } else { "declined" }
+    ));
+    let mut resp = message_proto::InviteResponse::new();
+    resp.accepted = accepted;
+    if !accepted {
+        resp.reason = "Declined".to_string();
+    }
+    let mut msg = message_proto::Message::new();
+    msg.set_invite_response(resp);
+    let _ = stream.send_msg(&msg.write_to_bytes().map_err(io_err)?);
+    Ok(())
 }
 
 fn rotate_password_if_needed() {
@@ -838,13 +938,22 @@ fn run_video_input_loop(
     peer_id: &str,
     initial_option: &message_proto::OptionMessage,
 ) -> io::Result<()> {
-    struct KeyReleaseGuard;
-    impl Drop for KeyReleaseGuard {
+    struct SessionEndGuard {
+        lock_after_end: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+    impl Drop for SessionEndGuard {
         fn drop(&mut self) {
             input::release_all_held_keys();
+            crate::privacy::turn_off();
+            platform::block_input(false);
+            if self.lock_after_end.get() {
+                crate::config::write_log("[server] Locking the screen after session end");
+                platform::lock_screen();
+            }
         }
     }
-    let _key_release_guard = KeyReleaseGuard;
+    let lock_after_end = std::rc::Rc::new(std::cell::Cell::new(false));
+    let _session_end_guard = SessionEndGuard { lock_after_end: lock_after_end.clone() };
 
     if displays.is_empty() {
         return Err(io::Error::new(io::ErrorKind::Other, "No displays found"));
@@ -869,6 +978,10 @@ fn run_video_input_loop(
     let mut quality_ratio: f32 = 1.0;
     let mut custom_fps: u32 = 0;
     apply_video_option(initial_option, &mut image_quality, &mut quality_ratio, &mut custom_fps);
+    let mut viewer_view_only = option_yes(initial_option.disable_keyboard) == Some(true);
+    let mut viewer_clipboard_off = option_yes(initial_option.disable_clipboard) == Some(true);
+    let mut file_copy_paste = option_yes(initial_option.enable_file_transfer) == Some(true);
+    lock_after_end.set(option_yes(initial_option.lock_after_session_end) == Some(true));
     if (quality_ratio - 1.0).abs() > f32::EPSILON {
         let kbps = ((base_bitrate_kbps as f32 * quality_ratio) as u32).max(200);
         if !encoder.set_bitrate(kbps) {
@@ -882,7 +995,7 @@ fn run_video_input_loop(
     let mut last_cursor_handle: usize = 0;
     let mut last_cursor_pos: (i32, i32) = (i32::MIN, i32::MIN);
     let mut last_cursor_check = Instant::now();
-    let mut show_remote_cursor = false;
+    let mut show_remote_cursor = option_yes(initial_option.show_remote_cursor) == Some(true);
 
     stream.set_read_timeout(Some(Duration::from_millis(1))).ok();
 
@@ -1010,6 +1123,42 @@ fn run_video_input_loop(
                                     quality_ratio, kbps, video_target_fps(image_quality, custom_fps)
                                 ));
                             }
+                            if keyboard_enabled {
+                                if let Some(on) = option_yes(opt.privacy_mode) {
+                                    let reply = set_privacy_mode(on, "");
+                                    let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
+                                }
+                                if let Some(on) = option_yes(opt.block_input) {
+                                    let ok = platform::block_input(on);
+                                    crate::config::write_log(&format!(
+                                        "[server] Block user input {} requested by peer -> {}",
+                                        if on { "on" } else { "off" },
+                                        if ok { "ok" } else { "failed" }
+                                    ));
+                                    let state = match (on, ok) {
+                                        (true, true) => message_proto::back_notification::BlockInputState::BlkOnSucceeded,
+                                        (true, false) => message_proto::back_notification::BlockInputState::BlkOnFailed,
+                                        (false, true) => message_proto::back_notification::BlockInputState::BlkOffSucceeded,
+                                        (false, false) => message_proto::back_notification::BlockInputState::BlkOffFailed,
+                                    };
+                                    let _ = stream.send_msg(&block_input_msg(state).write_to_bytes().unwrap_or_default());
+                                }
+                                if let Some(lock) = option_yes(opt.lock_after_session_end) {
+                                    lock_after_end.set(lock);
+                                }
+                            }
+                            if let Some(view_only) = option_yes(opt.disable_keyboard) {
+                                viewer_view_only = view_only;
+                            }
+                            if let Some(off) = option_yes(opt.disable_clipboard) {
+                                viewer_clipboard_off = off;
+                                if off {
+                                    last_clipboard_text.clear();
+                                }
+                            }
+                            if let Some(on) = option_yes(opt.enable_file_transfer) {
+                                file_copy_paste = on;
+                            }
                         }
                         let refresh_requested = match &misc.union {
                             Some(message_proto::misc::Union::RefreshVideo(r)) => *r,
@@ -1023,13 +1172,19 @@ fn run_video_input_loop(
                     }
 
                     if let Some(message_proto::message::Union::Cliprdr(ref cliprdr)) = msg.union {
-                        if clipboard_enabled {
+                        if clipboard_enabled && !viewer_clipboard_off && file_copy_paste {
                             let replies = crate::clipboard_file::handle_cliprdr_host(cliprdr);
                             for reply in replies {
                                 let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
                             }
                         }
-                    } else if let Some(reply) = handle_peer_message(&msg, screen_width, screen_height, keyboard_enabled, clipboard_enabled) {
+                    } else if let Some(reply) = handle_peer_message(
+                        &msg,
+                        screen_width,
+                        screen_height,
+                        keyboard_enabled && !viewer_view_only,
+                        clipboard_enabled && !viewer_clipboard_off,
+                    ) {
                         let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
                     }
                 }
@@ -1090,10 +1245,15 @@ fn run_video_input_loop(
             }
         }
 
-        if clipboard_enabled && last_clipboard_check.elapsed() >= clipboard_check_interval {
+        if clipboard_enabled && !viewer_clipboard_off && last_clipboard_check.elapsed() >= clipboard_check_interval {
             last_clipboard_check = Instant::now();
 
-            if let Some(msg) = crate::clipboard_file::check_clipboard_files_change() {
+            let files_msg = if file_copy_paste {
+                crate::clipboard_file::check_clipboard_files_change()
+            } else {
+                None
+            };
+            if let Some(msg) = files_msg {
                 let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
             } else if let Some(msg) = crate::clipboard::check_clipboard_change(&mut last_clipboard_text) {
                 let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
@@ -1179,6 +1339,15 @@ fn run_video_input_loop(
             if stream.send_msg(&msg.write_to_bytes().map_err(io_err)?).is_err() {
                 break;
             }
+        }
+
+        if crate::privacy::take_turned_off_locally() {
+            let off = privacy_mode_msg(
+                message_proto::back_notification::PrivacyModeState::PrvOffByPeer,
+                String::new(),
+                "",
+            );
+            let _ = stream.send_msg(&off.write_to_bytes().map_err(io_err)?);
         }
 
         if show_remote_cursor && now.duration_since(last_cursor_check) >= Duration::from_millis(100) {
@@ -1493,6 +1662,59 @@ fn link_dashboard_response_msg(accepted: bool, reason: &str) -> message_proto::M
     msg
 }
 
+fn option_yes(value: protobuf::EnumOrUnknown<message_proto::option_message::BoolOption>) -> Option<bool> {
+    match value.enum_value() {
+        Ok(message_proto::option_message::BoolOption::Yes) => Some(true),
+        Ok(message_proto::option_message::BoolOption::No) => Some(false),
+        _ => None,
+    }
+}
+
+fn block_input_msg(state: message_proto::back_notification::BlockInputState) -> message_proto::Message {
+    let mut notification = message_proto::BackNotification::new();
+    notification.set_block_input_state(state);
+    let mut misc = message_proto::Misc::new();
+    misc.set_back_notification(notification);
+    let mut msg = message_proto::Message::new();
+    msg.set_misc(misc);
+    msg
+}
+
+fn privacy_mode_msg(
+    state: message_proto::back_notification::PrivacyModeState,
+    details: String,
+    impl_key: &str,
+) -> message_proto::Message {
+    let mut notification = message_proto::BackNotification::new();
+    notification.set_privacy_mode_state(state);
+    notification.details = details;
+    notification.impl_key = impl_key.to_string();
+    let mut misc = message_proto::Misc::new();
+    misc.set_back_notification(notification);
+    let mut msg = message_proto::Message::new();
+    msg.set_misc(misc);
+    msg
+}
+
+fn set_privacy_mode(on: bool, impl_key: &str) -> message_proto::Message {
+    use message_proto::back_notification::PrivacyModeState;
+    let (state, details) = if on {
+        match crate::privacy::turn_on() {
+            Ok(()) => (PrivacyModeState::PrvOnSucceeded, String::new()),
+            Err(e) => (PrivacyModeState::PrvOnFailed, e),
+        }
+    } else {
+        crate::privacy::turn_off();
+        (PrivacyModeState::PrvOffSucceeded, String::new())
+    };
+    crate::config::write_log(&format!(
+        "[server] Privacy mode {} requested by peer -> {:?}",
+        if on { "on" } else { "off" },
+        state
+    ));
+    privacy_mode_msg(state, details, impl_key)
+}
+
 fn handle_misc(misc: &message_proto::Misc) -> Option<message_proto::Message> {
     match &misc.union {
         Some(message_proto::misc::Union::ChatMessage(chat)) => {
@@ -1507,9 +1729,8 @@ fn handle_misc(misc: &message_proto::Misc) -> Option<message_proto::Message> {
         Some(message_proto::misc::Union::CloseReason(reason)) => {
             crate::config::write_log(&format!("[server] Peer closed: {}", reason));
         }
-        Some(message_proto::misc::Union::TogglePrivacyMode(_)) => {
-
-            platform::blank_screen(true);
+        Some(message_proto::misc::Union::TogglePrivacyMode(t)) => {
+            return Some(set_privacy_mode(t.on, &t.impl_key));
         }
         Some(message_proto::misc::Union::RestartRemoteDevice(_)) => {
             crate::config::write_log(&format!("[server] Restart requested by remote peer"));

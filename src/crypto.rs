@@ -926,6 +926,104 @@ mod ed25519 {
 
         sm
     }
+
+    const SQRTM1: Gf = [0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x2f43,
+                        0xd7a7, 0x3dfb, 0x0099, 0x2b4d, 0xdf0b, 0x4fc1, 0x2480, 0x2b83];
+
+    fn ct_eq32(a: &[u8; 32], b: &[u8; 32]) -> bool {
+        let mut diff = 0u8;
+        for i in 0..32 {
+            diff |= a[i] ^ b[i];
+        }
+        diff == 0
+    }
+
+    fn neq25519(a: &Gf, b: &Gf) -> bool {
+        let mut c = [0u8; 32];
+        let mut d = [0u8; 32];
+        pack25519(&mut c, a);
+        pack25519(&mut d, b);
+        !ct_eq32(&c, &d)
+    }
+
+    fn pow2523(i: &Gf) -> Gf {
+        let mut c = *i;
+        for a in (0..=250i32).rev() {
+            c = gf_sq(&c);
+            if a != 1 {
+                c = gf_mul(&c, i);
+            }
+        }
+        c
+    }
+
+    fn unpackneg(pk: &[u8; 32]) -> Option<Point> {
+        let mut r: Point = [gf0(), gf0(), gf1(), gf0()];
+        unpack25519(&mut r[1], pk);
+
+        let num = gf_sq(&r[1]);
+        let den = gf_mul(&num, &D);
+        let num = gf_sub(&num, &r[2]);
+        let den = gf_add(&r[2], &den);
+
+        let den2 = gf_sq(&den);
+        let den4 = gf_sq(&den2);
+        let den6 = gf_mul(&den4, &den2);
+        let t = gf_mul(&den6, &num);
+        let t = gf_mul(&t, &den);
+
+        let t = pow2523(&t);
+        let t = gf_mul(&t, &num);
+        let t = gf_mul(&t, &den);
+        let t = gf_mul(&t, &den);
+        r[0] = gf_mul(&t, &den);
+
+        let chk = gf_mul(&gf_sq(&r[0]), &den);
+        if neq25519(&chk, &num) {
+            r[0] = gf_mul(&r[0], &SQRTM1);
+        }
+
+        let chk = gf_mul(&gf_sq(&r[0]), &den);
+        if neq25519(&chk, &num) {
+            return None;
+        }
+
+        if par(&r[0]) == (pk[31] >> 7) {
+            r[0] = gf_sub(&gf0(), &r[0]);
+        }
+
+        r[3] = gf_mul(&r[0], &r[1]);
+        Some(r)
+    }
+
+    pub fn open(sm: &[u8], pk: &[u8; 32]) -> Option<Vec<u8>> {
+        if sm.len() < 64 {
+            return None;
+        }
+        let q = unpackneg(pk)?;
+
+        let mut buf = sm.to_vec();
+        buf[32..64].copy_from_slice(pk);
+        let mut h = [0u8; 64];
+        h.copy_from_slice(&super::sha512(&buf));
+        reduce(&mut h);
+
+        let mut p = scalarmult(&q, &h[..32]);
+        let base = scalarbase(&sm[32..64]);
+        add(&mut p, &base);
+
+        let mut computed_r = [0u8; 32];
+        pack_point(&mut computed_r, &p);
+
+        let mut signed_r = [0u8; 32];
+        signed_r.copy_from_slice(&sm[..32]);
+
+        if ct_eq32(&signed_r, &computed_r) {
+            Some(sm[64..].to_vec())
+        } else {
+            None
+        }
+    }
 }
 
 pub fn ed25519_keypair(seed: &[u8; 32]) -> ([u8; 64], [u8; 32]) {
@@ -934,6 +1032,10 @@ pub fn ed25519_keypair(seed: &[u8; 32]) -> ([u8; 64], [u8; 32]) {
 
 pub fn ed25519_sign(msg: &[u8], sk: &[u8; 64]) -> Vec<u8> {
     ed25519::sign(msg, sk)
+}
+
+pub fn ed25519_verify(signed: &[u8], pk: &[u8; 32]) -> Option<Vec<u8>> {
+    ed25519::open(signed, pk)
 }
 
 #[cfg(test)]
@@ -1100,6 +1202,99 @@ mod tests {
             0xb0, 0x0d, 0x29, 0x16, 0x12, 0xbb, 0x0c, 0x00,
         ];
         assert_eq!(&signed[..64], &expected_sig[..], "Ed25519 sig for 0x72 mismatch");
+    }
+
+    #[test]
+    fn test_ed25519_verify_vector1() {
+
+        let seed: [u8; 32] = [
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
+            0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
+            0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
+            0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
+        ];
+        let expected_pk: [u8; 32] = [
+            0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
+            0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+            0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25,
+            0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+        ];
+        let (sk, pk) = ed25519_keypair(&seed);
+        assert_eq!(&pk[..], &expected_pk[..], "Ed25519 public key mismatch");
+
+        let signed = ed25519_sign(b"", &sk);
+        let opened = ed25519_verify(&signed, &pk).expect("valid signature must verify");
+        assert_eq!(opened, Vec::<u8>::new(), "Opened message should be empty");
+
+        let mut bad_sig = signed.clone();
+        bad_sig[0] ^= 1;
+        assert!(ed25519_verify(&bad_sig, &pk).is_none(), "Tampered R must not verify");
+
+        let mut bad_s = signed.clone();
+        bad_s[63] ^= 1;
+        assert!(ed25519_verify(&bad_s, &pk).is_none(), "Tampered S must not verify");
+
+        let mut wrong_pk = pk;
+        wrong_pk[0] ^= 1;
+        assert!(ed25519_verify(&signed, &wrong_pk).is_none(), "Wrong key must not verify");
+
+        assert!(ed25519_verify(&signed[..63], &pk).is_none(), "Short input must not verify");
+    }
+
+    #[test]
+    fn test_ed25519_verify_vector2() {
+
+        let seed: [u8; 32] = [
+            0x4c, 0xcd, 0x08, 0x9b, 0x28, 0xff, 0x96, 0xda,
+            0x9d, 0xb6, 0xc3, 0x46, 0xec, 0x11, 0x4e, 0x0f,
+            0x5b, 0x8a, 0x31, 0x9f, 0x35, 0xab, 0xa6, 0x24,
+            0xda, 0x8c, 0xf6, 0xed, 0x4f, 0xb8, 0xa6, 0xfb,
+        ];
+        let expected_pk: [u8; 32] = [
+            0x3d, 0x40, 0x17, 0xc3, 0xe8, 0x43, 0x89, 0x5a,
+            0x92, 0xb7, 0x0a, 0xa7, 0x4d, 0x1b, 0x7e, 0xbc,
+            0x9c, 0x98, 0x2c, 0xcf, 0x2e, 0xc4, 0x96, 0x8c,
+            0xc0, 0xcd, 0x55, 0xf1, 0x2a, 0xf4, 0x66, 0x0c,
+        ];
+        let (sk, pk) = ed25519_keypair(&seed);
+        assert_eq!(&pk[..], &expected_pk[..], "Ed25519 public key mismatch");
+
+        let signed = ed25519_sign(&[0x72], &sk);
+        let opened = ed25519_verify(&signed, &pk).expect("valid signature must verify");
+        assert_eq!(opened, vec![0x72], "Opened message should be 0x72");
+
+        let mut tampered_msg = signed.clone();
+        tampered_msg[64] ^= 1;
+        assert!(ed25519_verify(&tampered_msg, &pk).is_none(), "Tampered message must not verify");
+    }
+
+    #[test]
+    fn test_ed25519_verify_detached_vector3() {
+
+        let pk: [u8; 32] = [
+            0xfc, 0x51, 0xcd, 0x8e, 0x62, 0x18, 0xa1, 0xa3,
+            0x8d, 0xa4, 0x7e, 0xd0, 0x02, 0x30, 0xf0, 0x58,
+            0x08, 0x16, 0xed, 0x13, 0xba, 0x33, 0x03, 0xac,
+            0x5d, 0xeb, 0x91, 0x15, 0x48, 0x90, 0x80, 0x25,
+        ];
+        let sig: [u8; 64] = [
+            0x62, 0x91, 0xd6, 0x57, 0xde, 0xec, 0x24, 0x02,
+            0x48, 0x27, 0xe6, 0x9c, 0x3a, 0xbe, 0x01, 0xa3,
+            0x0c, 0xe5, 0x48, 0xa2, 0x84, 0x74, 0x3a, 0x44,
+            0x5e, 0x36, 0x80, 0xd7, 0xdb, 0x5a, 0xc3, 0xac,
+            0x18, 0xff, 0x9b, 0x53, 0x8d, 0x16, 0xf2, 0x90,
+            0xae, 0x67, 0xf7, 0x60, 0x98, 0x4d, 0xc6, 0x59,
+            0x4a, 0x7c, 0x15, 0xe9, 0x71, 0x6e, 0xd2, 0x8d,
+            0xc0, 0x27, 0xbe, 0xce, 0xea, 0x1e, 0xc4, 0x0a,
+        ];
+        let msg = [0xafu8, 0x82];
+
+        let mut signed = Vec::with_capacity(66);
+        signed.extend_from_slice(&sig);
+        signed.extend_from_slice(&msg);
+
+        let opened = ed25519_verify(&signed, &pk).expect("RFC 8032 test 3 must verify");
+        assert_eq!(opened, msg.to_vec(), "Opened message should be af82");
     }
 
     #[test]

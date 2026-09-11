@@ -294,19 +294,6 @@ pub fn try_change_desktop() -> bool {
     }
 }
 
-pub fn blank_screen(blank: bool) {
-    use winapi::um::winuser::{SendMessageW, HWND_BROADCAST, SC_MONITORPOWER, WM_SYSCOMMAND};
-    unsafe {
-        let param = if blank { 2isize } else { -1isize };
-        SendMessageW(
-            HWND_BROADCAST,
-            WM_SYSCOMMAND,
-            SC_MONITORPOWER as _,
-            param,
-        );
-    }
-}
-
 pub fn get_clipboard_text() -> Option<String> {
     use winapi::um::winuser::{
         CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, CF_UNICODETEXT,

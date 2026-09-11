@@ -891,6 +891,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Please enter a remote port number", "請輸入遠端連接埠號碼"),
         ("Please enter local and remote port numbers", "請輸入本機和遠端連接埠號碼"),
         ("Copy", "複製"),
+        ("Copy failed", "複製失敗"),
         ("Add to my Dashboard", "新增到我的儀表板"),
         ("Add this computer to {} HopToDesk Dashboard?", "Add this computer to {} HopToDesk Dashboard?"),
         ("They will be able to see when this computer is online and provide remote support. You can undo this anytime in Settings → Dashboard.", "They will be able to see when this computer is online and provide remote support. You can undo this anytime in Settings → Dashboard."),

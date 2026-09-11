@@ -53,6 +53,148 @@ fn prompt_insecure_consent(client_state: &Arc<Mutex<ClientState>>, target_id: &s
     proceed
 }
 
+const PEER_PUBLIC_KEY_OPTION: &str = "public_key";
+
+#[derive(Clone, Copy, PartialEq)]
+enum PeerKeySource {
+    Pinned,
+    SignalRelayed,
+    PeerSupplied,
+}
+
+impl PeerKeySource {
+    fn label(self) -> &'static str {
+        match self {
+            PeerKeySource::Pinned => "pinned key",
+            PeerKeySource::SignalRelayed => "signal-relayed key",
+            PeerKeySource::PeerSupplied => "peer-supplied key (unauthenticated)",
+        }
+    }
+}
+
+pub fn decode_peer_sign_pk(encoded: &str) -> Option<[u8; 32]> {
+    let bytes = crate::config::base64_decode(encoded)?;
+    if bytes.len() != 32 {
+        return None;
+    }
+    let mut pk = [0u8; 32];
+    pk.copy_from_slice(&bytes);
+    Some(pk)
+}
+
+fn load_pinned_peer_sign_pk(target_id: &str) -> Option<[u8; 32]> {
+    decode_peer_sign_pk(
+        &crate::config::PeerConfig::load(target_id).get_option(PEER_PUBLIC_KEY_OPTION),
+    )
+}
+
+fn pin_peer_sign_pk(target_id: &str, sign_pk: &[u8; 32]) {
+    let mut cfg = crate::config::PeerConfig::load(target_id);
+    cfg.set_option(
+        PEER_PUBLIC_KEY_OPTION,
+        &crate::config::base64_encode(sign_pk),
+    );
+    cfg.save(target_id);
+}
+
+fn signed_id_matches_target(id: &str, target_id: &str) -> bool {
+    if id == target_id {
+        return true;
+    }
+    let host = if target_id.starts_with('[') {
+        target_id.trim_start_matches('[').split(']').next().unwrap_or(target_id)
+    } else {
+        target_id.split(':').next().unwrap_or(target_id)
+    };
+    match (
+        id.parse::<std::net::IpAddr>(),
+        host.parse::<std::net::IpAddr>(),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+enum VerifyFailure {
+    Signature(String),
+    Identity(String),
+}
+
+impl VerifyFailure {
+    fn detail(&self) -> &str {
+        match self {
+            VerifyFailure::Signature(d) | VerifyFailure::Identity(d) => d,
+        }
+    }
+}
+
+fn verified_session_pk(
+    signed: &[u8],
+    sign_pk: &[u8; 32],
+    target_id: &str,
+) -> Result<[u8; 32], VerifyFailure> {
+    let payload = crate::crypto::ed25519_verify(signed, sign_pk)
+        .ok_or_else(|| VerifyFailure::Signature("signature did not verify".to_string()))?;
+    let id_pk = message_proto::IdPk::parse_from_bytes(&payload)
+        .map_err(|e| VerifyFailure::Signature(format!("signed payload is not an IdPk: {}", e)))?;
+    if !signed_id_matches_target(&id_pk.id, target_id) {
+        return Err(VerifyFailure::Identity(format!(
+            "signed id {} does not match {}",
+            id_pk.id, target_id
+        )));
+    }
+    if id_pk.pk.len() != 32 {
+        return Err(VerifyFailure::Signature(format!(
+            "signed session key is {} bytes",
+            id_pk.pk.len()
+        )));
+    }
+    let mut session_pk = [0u8; 32];
+    session_pk.copy_from_slice(&id_pk.pk);
+    Ok(session_pk)
+}
+
+fn request_peer_supplied_sign_pk(stream: &mut FramedStream) -> io::Result<Option<[u8; 32]>> {
+    let mut chat = message_proto::ChatMessage::new();
+    chat.text = "E".to_string();
+    let mut misc = message_proto::Misc::new();
+    misc.union = Some(message_proto::misc::Union::ChatMessage(chat));
+    let mut msg = message_proto::Message::new();
+    msg.set_misc(misc);
+    stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+
+    let data = stream.recv_msg()?;
+    let reply = message_proto::Message::parse_from_bytes(&data).map_err(io_err)?;
+    if let Some(message_proto::message::Union::Misc(m)) = reply.union {
+        if let Some(message_proto::misc::Union::UnauthenticatedInitialPublicKeyResponse(resp)) =
+            m.union
+        {
+            if resp.unauthenticated_initial_public_key.len() == 32 {
+                let mut pk = [0u8; 32];
+                pk.copy_from_slice(&resp.unauthenticated_initial_public_key);
+                return Ok(Some(pk));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn identity_error(target_id: &str, source: PeerKeySource, detail: &str) -> io::Error {
+    crate::config::write_log(&format!(
+        "[client] Peer identity check failed for {} against the {}: {}",
+        target_id,
+        source.label(),
+        detail
+    ));
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        crate::lang::translate(
+            "The remote device could not prove its identity. The connection was stopped."
+                .to_string(),
+        ),
+    )
+}
+
 pub struct ClientState {
     pub status: String,
     pub error: String,
@@ -119,12 +261,13 @@ pub fn connect_to_peer(
     my_id: &str,
     target_id: &str,
     password: &str,
+    signal_pk: Option<[u8; 32]>,
     client_state: Arc<Mutex<ClientState>>,
     stop: Arc<AtomicBool>,
 ) {
     crate::config::write_log(&format!("[client] Connecting to {}...", crate::config::mask_ip(&addr)));
 
-    let result = run_client(addr, my_id, target_id, password, &client_state, &stop, false);
+    let result = run_client(addr, my_id, target_id, password, signal_pk, &client_state, &stop, false);
 
     if let Err(e) = result {
         crate::config::write_log(&format!("[client] Error: {}", e));
@@ -146,11 +289,12 @@ pub fn connect_to_peer_ft(
     my_id: &str,
     target_id: &str,
     password: &str,
+    signal_pk: Option<[u8; 32]>,
     client_state: Arc<Mutex<ClientState>>,
     stop: Arc<AtomicBool>,
 ) {
     crate::config::write_log(&format!("[client] Connecting to {} (file transfer)...", crate::config::mask_ip(&addr)));
-    let result = run_client(addr, my_id, target_id, password, &client_state, &stop, true);
+    let result = run_client(addr, my_id, target_id, password, signal_pk, &client_state, &stop, true);
     if let Err(e) = result {
         crate::config::write_log(&format!("[client] Error: {}", e));
         if let Ok(mut state) = client_state.lock() {
@@ -186,10 +330,11 @@ pub fn run_client_on_stream(
     my_id: &str,
     target_id: &str,
     password: &str,
+    signal_pk: Option<[u8; 32]>,
     client_state: Arc<Mutex<ClientState>>,
     stop: Arc<AtomicBool>,
 ) {
-    let result = run_client_inner(stream, my_id, target_id, password, &client_state, &stop, false);
+    let result = run_client_inner(stream, my_id, target_id, password, signal_pk, &client_state, &stop, false);
     if let Err(e) = result {
         crate::config::write_log(&format!("[client] Error: {}", e));
         if let Ok(mut state) = client_state.lock() {
@@ -209,10 +354,11 @@ pub fn run_client_on_stream_ft(
     my_id: &str,
     target_id: &str,
     password: &str,
+    signal_pk: Option<[u8; 32]>,
     client_state: Arc<Mutex<ClientState>>,
     stop: Arc<AtomicBool>,
 ) {
-    let result = run_client_inner(stream, my_id, target_id, password, &client_state, &stop, true);
+    let result = run_client_inner(stream, my_id, target_id, password, signal_pk, &client_state, &stop, true);
     if let Err(e) = result {
         crate::config::write_log(&format!("[client] Error: {}", e));
         if let Ok(mut state) = client_state.lock() {
@@ -227,11 +373,80 @@ pub fn run_client_on_stream_ft(
     }
 }
 
+const INVITE_ANSWER_WAIT: Duration = Duration::from_secs(120);
+
+pub fn send_invite_on_stream(
+    mut stream: FramedStream,
+    my_id: &str,
+    target_id: &str,
+    signal_pk: Option<[u8; 32]>,
+    from_name: &str,
+    password: &str,
+) -> io::Result<bool> {
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
+    let (_hash, secured) = client_handshake(&mut stream, target_id, signal_pk)?;
+    if !secured {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "Peer identity could not be verified, invitation not sent",
+        ));
+    }
+
+    let mut req = message_proto::InviteRequest::new();
+    req.from_id = my_id.to_string();
+    req.from_name = from_name.to_string();
+    req.password_to_connect = password.to_string();
+    let mut msg = message_proto::Message::new();
+    msg.set_invite_request(req);
+    stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+    crate::config::write_log(&format!("[invite] Invitation sent to {}, waiting for the answer", target_id));
+
+    let deadline = Instant::now() + INVITE_ANSWER_WAIT;
+    while Instant::now() < deadline {
+        let data = match stream.recv_msg() {
+            Ok(d) => d,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock {
+                    continue;
+                }
+                return Err(e);
+            }
+        };
+        let msg = message_proto::Message::parse_from_bytes(&data).map_err(io_err)?;
+        match msg.union {
+            Some(message_proto::message::Union::InviteResponse(answer)) => {
+                return Ok(answer.accepted);
+            }
+            Some(message_proto::message::Union::TestDelay(td)) => {
+                if td.from_client {
+                    continue;
+                }
+                let mut echo = message_proto::TestDelay::new();
+                echo.time = td.time;
+                echo.last_delay = td.last_delay;
+                echo.from_client = true;
+                let mut reply = message_proto::Message::new();
+                reply.set_test_delay(echo);
+                stream.send_msg(&reply.write_to_bytes().map_err(io_err)?)?;
+            }
+            Some(message_proto::message::Union::Misc(misc)) => {
+                if let Some(message_proto::misc::Union::CloseReason(reason)) = &misc.union {
+                    return Err(io::Error::new(io::ErrorKind::ConnectionRefused, reason.clone()));
+                }
+            }
+            _ => {}
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::TimedOut, "No answer to the invitation"))
+}
+
 fn run_client(
     addr: &str,
     my_id: &str,
     target_id: &str,
     password: &str,
+    signal_pk: Option<[u8; 32]>,
     client_state: &Arc<Mutex<ClientState>>,
     stop: &Arc<AtomicBool>,
     file_transfer: bool,
@@ -239,26 +454,14 @@ fn run_client(
 
     let stream = FramedStream::connect(addr, CONNECT_TIMEOUT)?;
     crate::config::write_log(&format!("[client] Connected to {}", crate::config::mask_ip(&addr)));
-    run_client_inner(stream, my_id, target_id, password, client_state, stop, file_transfer)
+    run_client_inner(stream, my_id, target_id, password, signal_pk, client_state, stop, file_transfer)
 }
 
-fn run_client_inner(
-    mut stream: FramedStream,
-    my_id: &str,
+fn client_handshake(
+    stream: &mut FramedStream,
     target_id: &str,
-    password: &str,
-    client_state: &Arc<Mutex<ClientState>>,
-    stop: &Arc<AtomicBool>,
-    file_transfer: bool,
-) -> io::Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
-    stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
-
-    if let Ok(mut state) = client_state.lock() {
-        state.status = "login".into();
-        state.tcp_connected = true;
-    }
-
+    signal_pk: Option<[u8; 32]>,
+) -> io::Result<(message_proto::Hash, bool)> {
     let data = stream.recv_msg()?;
     let msg = message_proto::Message::parse_from_bytes(&data).map_err(io_err)?;
 
@@ -266,22 +469,82 @@ fn run_client_inner(
     let hash = match msg.union {
         Some(message_proto::message::Union::Hash(h)) => h,
         Some(message_proto::message::Union::SignedId(signed_id)) => {
-            crate::config::write_log("[client] Got SignedId, attempting key exchange");
+            crate::config::write_log("[client] Got SignedId, verifying peer identity");
+
+            let pinned_pk = load_pinned_peer_sign_pk(target_id);
 
             let mut server_pk = [0u8; 32];
             let mut has_server_pk = false;
-            if let Ok(id_pk) = message_proto::IdPk::parse_from_bytes(&signed_id.id) {
-                if id_pk.pk.len() == 32 {
-                    server_pk.copy_from_slice(&id_pk.pk);
-                    has_server_pk = true;
-                }
-            }
-            if !has_server_pk && signed_id.id.len() > 64 {
 
-                if let Ok(id_pk) = message_proto::IdPk::parse_from_bytes(&signed_id.id[64..]) {
-                    if id_pk.pk.len() == 32 {
-                        server_pk.copy_from_slice(&id_pk.pk);
+            if let Some(pinned) = pinned_pk {
+                if let Some(relayed) = signal_pk {
+                    if relayed != pinned {
+                        crate::config::write_log(
+                            "[client] Signal-relayed key differs from the pinned key; using the pinned key",
+                        );
+                    }
+                }
+                match verified_session_pk(&signed_id.id, &pinned, target_id) {
+                    Ok(session_pk) => {
+                        server_pk = session_pk;
                         has_server_pk = true;
+                        crate::config::write_log("[client] Peer identity verified (pinned key)");
+                    }
+                    Err(failure) => {
+                        return Err(identity_error(target_id, PeerKeySource::Pinned, failure.detail()));
+                    }
+                }
+            } else if let Some(relayed) = signal_pk {
+                match verified_session_pk(&signed_id.id, &relayed, target_id) {
+                    Ok(session_pk) => {
+                        server_pk = session_pk;
+                        has_server_pk = true;
+                        pin_peer_sign_pk(target_id, &relayed);
+                        crate::config::write_log(
+                            "[client] Peer identity verified (signal-relayed key), key pinned for this peer",
+                        );
+                    }
+                    Err(failure) => {
+                        return Err(identity_error(
+                            target_id,
+                            PeerKeySource::SignalRelayed,
+                            failure.detail(),
+                        ));
+                    }
+                }
+            } else {
+                crate::config::write_log(
+                    "[client] No trusted key for this peer, requesting one from the peer itself",
+                );
+                match request_peer_supplied_sign_pk(stream)? {
+                    Some(supplied) => {
+                        match verified_session_pk(&signed_id.id, &supplied, target_id) {
+                            Ok(session_pk) => {
+                                server_pk = session_pk;
+                                has_server_pk = true;
+                                crate::config::write_log(
+                                    "[client] Peer identity verified against a peer-supplied key; encrypted but not authenticated, key not pinned",
+                                );
+                            }
+                            Err(VerifyFailure::Identity(detail)) => {
+                                crate::config::write_log(&format!(
+                                    "[client] Peer-supplied key verified but {}; continuing without encryption",
+                                    detail
+                                ));
+                            }
+                            Err(failure) => {
+                                return Err(identity_error(
+                                    target_id,
+                                    PeerKeySource::PeerSupplied,
+                                    failure.detail(),
+                                ));
+                            }
+                        }
+                    }
+                    None => {
+                        crate::config::write_log(
+                            "[client] Peer supplied no usable key, continuing without encryption",
+                        );
                     }
                 }
             }
@@ -334,6 +597,28 @@ fn run_client_inner(
             ))
         }
     };
+    Ok((hash, secured))
+}
+
+fn run_client_inner(
+    mut stream: FramedStream,
+    my_id: &str,
+    target_id: &str,
+    password: &str,
+    signal_pk: Option<[u8; 32]>,
+    client_state: &Arc<Mutex<ClientState>>,
+    stop: &Arc<AtomicBool>,
+    file_transfer: bool,
+) -> io::Result<()> {
+    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
+
+    if let Ok(mut state) = client_state.lock() {
+        state.status = "login".into();
+        state.tcp_connected = true;
+    }
+
+    let (hash, secured) = client_handshake(&mut stream, target_id, signal_pk)?;
 
     crate::config::write_log(&format!("[client] Got Hash challenge, authenticating..."));
 

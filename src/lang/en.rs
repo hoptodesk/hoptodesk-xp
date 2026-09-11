@@ -235,6 +235,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("View Camera", "View Camera"),
         ("Are you sure you want to delete", "Are you sure you want to delete"),
         ("Copy", "Copy"),
+        ("Copy failed", "Copy failed"),
         ("Please enter a local port number", "Please enter a local port number"),
         ("Please enter a remote port number", "Please enter a remote port number"),
         ("Please enter local and remote port numbers", "Please enter local and remote port numbers"),

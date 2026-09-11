@@ -168,7 +168,9 @@ impl Config {
 
         let mut generated = false;
         if cfg.id.is_empty() {
-            cfg.id = generate_id();
+            if !cfg.import_legacy_identity() {
+                cfg.id = generate_id();
+            }
             generated = true;
         }
         if cfg.password.is_empty() {
@@ -214,6 +216,58 @@ impl Config {
                 }
             }
         }
+    }
+
+    fn import_legacy_identity(&mut self) -> bool {
+        let shared = match shared_app_dir() {
+            Some(d) => d,
+            None => return false,
+        };
+        let src = shared.join("config").join(format!("{}.toml", APP_NAME));
+        if src == self.path || !src.exists() {
+            return false;
+        }
+        match std::fs::metadata(&src) {
+            Ok(m) if m.len() <= 65536 => {}
+            _ => return false,
+        }
+        let mut old = Config {
+            id: String::new(),
+            password: String::new(),
+            permanent_password: String::new(),
+            salt: String::new(),
+            key_confirmed: false,
+            encryption_key: String::new(),
+            key_pair: (Vec::new(), Vec::new()),
+            path: src.clone(),
+        };
+        old.read();
+        let id_ok = old.id.len() >= 6
+            && old.id.len() <= 16
+            && old.id.chars().all(|c| c.is_ascii_digit());
+        let keys_ok = old.key_pair.0.len() == 64
+            && old.key_pair.1.len() == 32
+            && old.key_pair.0[32..] == old.key_pair.1[..];
+        if !id_ok || !keys_ok || old.salt.len() > 64 || old.password.len() > 128
+            || old.permanent_password.len() > 128 {
+            return false;
+        }
+        self.id = old.id;
+        self.salt = old.salt;
+        self.key_pair = old.key_pair;
+        self.key_confirmed = old.key_confirmed;
+        if !old.password.is_empty() {
+            self.password = old.password;
+        }
+        if !old.permanent_password.is_empty() {
+            self.permanent_password = old.permanent_password;
+        }
+        write_log(&format!(
+            "[config] Imported identity {} from {}",
+            self.id,
+            src.display()
+        ));
+        true
     }
 
     pub fn save(&self) {
@@ -626,28 +680,21 @@ fn parse_toml_line(line: &str) -> Option<(&str, String)> {
 }
 
 pub fn toml_encode_str(val: &str) -> String {
-    let needs_basic = val
-        .chars()
-        .any(|c| c == '\'' || c == '\n' || c == '\r' || c.is_control());
-    if !needs_basic {
-        format!("'{}'", val)
-    } else {
-        let mut out = String::with_capacity(val.len() + 2);
-        out.push('"');
-        for c in val.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
-                c => out.push(c),
-            }
+    let mut out = String::with_capacity(val.len() + 2);
+    out.push('"');
+    for c in val.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
         }
-        out.push('"');
-        out
     }
+    out.push('"');
+    out
 }
 
 fn toml_decode_str(val: &str) -> String {
@@ -710,7 +757,7 @@ fn generate_id() -> String {
     format!("{}", 100_000_000 + (combined % 900_000_000) as u64)
 }
 
-fn generate_password() -> String {
+pub(crate) fn generate_password() -> String {
     generate_random_string(8)
 }
 

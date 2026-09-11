@@ -103,6 +103,139 @@ unsafe fn close_remote_window() {
     PostMessageA(REMOTE_HWND as *mut std::ffi::c_void, WM_CLOSE, 0, 0);
 }
 
+pub fn open_peer_stream(
+    target: &str,
+    my_id: &str,
+) -> Result<(crate::network::FramedStream, Option<[u8; 32]>), String> {
+    let signal_state = Arc::new(Mutex::new(signal::SignalState::default()));
+
+    let peer = match signal::send_connect_request(my_id, target, &signal_state) {
+        Ok(peer) => peer,
+        Err(e) => {
+            crate::config::write_log(&format!("[connect] ConnectRequest failed: {}", e));
+            return Err(e);
+        }
+    };
+    crate::config::write_log(&format!("[connect] Got peer: addr={} public={}", crate::config::mask_ip(&peer.addr), crate::config::mask_ip(&peer.public_addr)));
+
+    let signal_pk = client::decode_peer_sign_pk(&peer.pk);
+    if signal_pk.is_none() {
+        crate::config::write_log("[connect] Signal reply carried no usable peer key");
+    }
+
+    enum Race {
+        Direct(Option<crate::network::FramedStream>),
+        Turn(Result<crate::network::FramedStream, String>),
+    }
+
+    let force_relay = config::PeerConfig::load(target).get_option("force-always-relay") == "Y";
+    if force_relay {
+        crate::config::write_log("[connect] force-always-relay set, skipping direct");
+    }
+
+    let mut unique_addrs = Vec::new();
+    if !force_relay {
+        for addr in [&peer.addr, &peer.public_addr] {
+            if !addr.is_empty() && !unique_addrs.contains(&addr.to_string()) {
+                unique_addrs.push(addr.to_string());
+            }
+        }
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let racing_direct = !unique_addrs.is_empty();
+    let mut direct_done = !racing_direct;
+    if racing_direct {
+        let tx2 = tx.clone();
+        thread::spawn(move || {
+            let _ = tx2.send(Race::Direct(client::connect_direct_stream(&unique_addrs)));
+        });
+    }
+
+    let mut winner = None;
+    if racing_direct {
+        if let Ok(Race::Direct(opt)) = rx.recv_timeout(std::time::Duration::from_millis(1000)) {
+            direct_done = true;
+            winner = opt;
+        }
+    }
+
+    if winner.is_none() {
+        crate::config::write_log("[connect] Starting TURN relay...");
+
+        let relay_addr = if !peer.public_addr.is_empty() {
+            peer.public_addr.clone()
+        } else {
+            peer.addr.clone()
+        };
+
+        let (ws_host, ws_port) = {
+            let ss = signal_state.lock().unwrap();
+            (ss.ws_host.clone(), ss.ws_port)
+        };
+
+        let tx2 = tx.clone();
+        let target2 = target.to_string();
+        let my_id3 = my_id.to_string();
+        thread::spawn(move || {
+            let _ = tx2.send(Race::Turn(turn::connect_via_turn(
+                &relay_addr, &target2, &my_id3, &ws_host, ws_port,
+            )));
+        });
+
+        let mut turn_done = false;
+        while winner.is_none() && !(direct_done && turn_done) {
+            match rx.recv() {
+                Ok(Race::Direct(opt)) => {
+                    direct_done = true;
+                    if opt.is_some() {
+                        winner = opt;
+                    }
+                }
+                Ok(Race::Turn(res)) => {
+                    turn_done = true;
+                    match res {
+                        Ok(stream) => {
+                            crate::config::write_log("[connect] Connected via TURN relay!");
+                            winner = Some(stream);
+                        }
+                        Err(e) => {
+                            crate::config::write_log(&format!("[connect] TURN relay failed: {}", e));
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    }
+    drop(rx);
+
+    match winner {
+        Some(stream) => Ok((stream, signal_pk)),
+        None => Err("Could not connect (direct + relay failed)".to_string()),
+    }
+}
+
+pub fn run_invite_process(target_id: &str) {
+    let cfg = config::Config::load();
+    let password = if cfg.password.is_empty() {
+        cfg.permanent_password.clone()
+    } else {
+        cfg.password.clone()
+    };
+    let from_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "XP-Client".into());
+    crate::config::write_log(&format!("[invite] Sending an invitation to {}", target_id));
+    let outcome = open_peer_stream(target_id, &cfg.id).and_then(|(stream, signal_pk)| {
+        client::send_invite_on_stream(stream, &cfg.id, target_id, signal_pk, &from_name, &password)
+            .map_err(|e| e.to_string())
+    });
+    match outcome {
+        Ok(true) => crate::config::write_log(&format!("[invite] {} accepted the invitation", target_id)),
+        Ok(false) => crate::config::write_log(&format!("[invite] {} declined the invitation", target_id)),
+        Err(e) => crate::config::write_log(&format!("[invite] Invitation to {} failed: {}", target_id, e)),
+    }
+}
+
 pub fn run_connect_process_ex(target_id: &str, peer_password: &str, is_file_transfer: bool, switch_uuid: Option<&str>) {
     if let Some(uuid) = switch_uuid {
         unsafe { SWITCH_UUID = Some(uuid.to_string()); }
@@ -145,131 +278,26 @@ pub fn run_connect_process(target_id: &str, peer_password: &str, is_file_transfe
         if is_direct_ip(&target) {
             crate::config::write_log(&format!("[connect] Direct IP connection to {}", crate::config::mask_ip(&target)));
             if ft {
-                client::connect_to_peer_ft(&target, &my_id2, &target, &pw2, cs.clone(), stop.clone());
+                client::connect_to_peer_ft(&target, &my_id2, &target, &pw2, None, cs.clone(), stop.clone());
             } else {
-                client::connect_to_peer(&target, &my_id2, &target, &pw2, cs.clone(), stop.clone());
+                client::connect_to_peer(&target, &my_id2, &target, &pw2, None, cs.clone(), stop.clone());
             }
             return;
         }
 
-        let signal_state = Arc::new(Mutex::new(signal::SignalState::default()));
-
-        match signal::send_connect_request(&my_id2, &target, &signal_state) {
-            Ok(peer) => {
-                crate::config::write_log(&format!("[connect] Got peer: addr={} public={}", crate::config::mask_ip(&peer.addr), crate::config::mask_ip(&peer.public_addr)));
-
-                enum Race {
-                    Direct(Option<crate::network::FramedStream>),
-                    Turn(Result<crate::network::FramedStream, String>),
-                }
-
-                let force_relay =
-                    config::PeerConfig::load(&target).get_option("force-always-relay") == "Y";
-                if force_relay {
-                    crate::config::write_log("[connect] force-always-relay set, skipping direct");
-                }
-
-                let mut unique_addrs = Vec::new();
-                if !force_relay {
-                    for addr in [&peer.addr, &peer.public_addr] {
-                        if !addr.is_empty() && !unique_addrs.contains(&addr.to_string()) {
-                            unique_addrs.push(addr.to_string());
-                        }
-                    }
-                }
-
-                let (tx, rx) = std::sync::mpsc::channel();
-                let racing_direct = !unique_addrs.is_empty();
-                let mut direct_done = !racing_direct;
-                if racing_direct {
-                    let tx2 = tx.clone();
-                    thread::spawn(move || {
-                        let _ = tx2.send(Race::Direct(client::connect_direct_stream(&unique_addrs)));
-                    });
-                }
-
-                let mut winner = None;
-                if racing_direct {
-                    if let Ok(Race::Direct(opt)) =
-                        rx.recv_timeout(std::time::Duration::from_millis(1000))
-                    {
-                        direct_done = true;
-                        winner = opt;
-                    }
-                }
-
-                if winner.is_none() {
-                    crate::config::write_log("[connect] Starting TURN relay...");
-
-                    let relay_addr = if !peer.public_addr.is_empty() {
-                        peer.public_addr.clone()
-                    } else {
-                        peer.addr.clone()
-                    };
-
-                    let (ws_host, ws_port) = {
-                        let ss = signal_state.lock().unwrap();
-                        (ss.ws_host.clone(), ss.ws_port)
-                    };
-
-                    let tx2 = tx.clone();
-                    let target2 = target.clone();
-                    let my_id3 = my_id2.clone();
-                    thread::spawn(move || {
-                        let _ = tx2.send(Race::Turn(turn::connect_via_turn(
-                            &relay_addr, &target2, &my_id3, &ws_host, ws_port,
-                        )));
-                    });
-
-                    let mut turn_done = false;
-                    while winner.is_none() && !(direct_done && turn_done) {
-                        match rx.recv() {
-                            Ok(Race::Direct(opt)) => {
-                                direct_done = true;
-                                if opt.is_some() {
-                                    winner = opt;
-                                }
-                            }
-                            Ok(Race::Turn(res)) => {
-                                turn_done = true;
-                                match res {
-                                    Ok(stream) => {
-                                        crate::config::write_log("[connect] Connected via TURN relay!");
-                                        winner = Some(stream);
-                                    }
-                                    Err(e) => {
-                                        crate::config::write_log(&format!("[connect] TURN relay failed: {}", e));
-                                    }
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                }
-                drop(rx);
-
-                match winner {
-                    Some(stream) => {
-                        if ft {
-                            client::run_client_on_stream_ft(
-                                stream, &my_id2, &target, &pw2, cs.clone(), stop.clone(),
-                            );
-                        } else {
-                            client::run_client_on_stream(
-                                stream, &my_id2, &target, &pw2, cs.clone(), stop.clone(),
-                            );
-                        }
-                    }
-                    None => {
-                        if let Ok(mut s) = cs.lock() {
-                            s.status = "error".into();
-                            s.error = "Could not connect (direct + relay failed)".into();
-                        }
-                    }
+        match open_peer_stream(&target, &my_id2) {
+            Ok((stream, signal_pk)) => {
+                if ft {
+                    client::run_client_on_stream_ft(
+                        stream, &my_id2, &target, &pw2, signal_pk, cs.clone(), stop.clone(),
+                    );
+                } else {
+                    client::run_client_on_stream(
+                        stream, &my_id2, &target, &pw2, signal_pk, cs.clone(), stop.clone(),
+                    );
                 }
             }
             Err(e) => {
-                crate::config::write_log(&format!("[connect] ConnectRequest failed: {}", e));
                 if let Ok(mut s) = cs.lock() {
                     s.status = "error".into();
                     s.error = e;
@@ -878,6 +906,11 @@ unsafe fn retry_connection_with_password(password: &str) {
             Ok(peer) => {
                 crate::config::write_log(&format!("[connect/retry] Got peer: addr={} public={}", crate::config::mask_ip(&peer.addr), crate::config::mask_ip(&peer.public_addr)));
 
+                let signal_pk = client::decode_peer_sign_pk(&peer.pk);
+                if signal_pk.is_none() {
+                    crate::config::write_log("[connect/retry] Signal reply carried no usable peer key");
+                }
+
                 let mut unique_addrs = Vec::new();
                 for addr in [&peer.addr, &peer.public_addr] {
                     if !addr.is_empty() && !unique_addrs.contains(&addr.to_string()) {
@@ -889,9 +922,9 @@ unsafe fn retry_connection_with_password(password: &str) {
                 for addr in &unique_addrs {
                     crate::config::write_log(&format!("[connect/retry] Trying direct TCP to {}...", crate::config::mask_ip(&addr)));
                     if is_ft {
-                        client::connect_to_peer_ft(addr, &my_id, &target_id, &pw, cs.clone(), stop.clone());
+                        client::connect_to_peer_ft(addr, &my_id, &target_id, &pw, signal_pk, cs.clone(), stop.clone());
                     } else {
-                        client::connect_to_peer(addr, &my_id, &target_id, &pw, cs.clone(), stop.clone());
+                        client::connect_to_peer(addr, &my_id, &target_id, &pw, signal_pk, cs.clone(), stop.clone());
                     }
                     if let Ok(s) = cs.lock() {
                         if s.status == "connected" || s.status == "closed" || s.status == "error" {
@@ -924,11 +957,11 @@ unsafe fn retry_connection_with_password(password: &str) {
                             crate::config::write_log(&format!("[connect/retry] Connected via TURN relay!"));
                             if is_ft {
                                 client::run_client_on_stream_ft(
-                                    stream, &my_id, &target_id, &pw, cs.clone(), stop.clone(),
+                                    stream, &my_id, &target_id, &pw, signal_pk, cs.clone(), stop.clone(),
                                 );
                             } else {
                                 client::run_client_on_stream(
-                                    stream, &my_id, &target_id, &pw, cs.clone(), stop.clone(),
+                                    stream, &my_id, &target_id, &pw, signal_pk, cs.clone(), stop.clone(),
                                 );
                             }
                         }

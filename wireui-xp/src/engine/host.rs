@@ -1090,6 +1090,33 @@ impl NativeObj for ElementNative {
             "value" => {
                 let v = to_display(&value);
                 let mut engine = self.engine.borrow_mut();
+                let option_children: Vec<NodeKey> = engine
+                    .doc
+                    .arena
+                    .get(self.key)
+                    .filter(|n| n.tag == "select")
+                    .map(|n| n.children.clone())
+                    .unwrap_or_default();
+                let has_match = option_children.iter().any(|&c| {
+                    engine
+                        .doc
+                        .arena
+                        .get(c)
+                        .map_or(false, |o| o.tag == "option" && o.attr("value") == Some(v.as_str()))
+                });
+                if has_match {
+                    for c in option_children {
+                        if let Some(opt) = engine.doc.arena.get_mut(c) {
+                            if opt.tag == "option" {
+                                if opt.attr("value") == Some(v.as_str()) {
+                                    opt.set_attr("selected", "");
+                                } else {
+                                    opt.remove_attr("selected");
+                                }
+                            }
+                        }
+                    }
+                }
                 if let Some(node) = engine.doc.arena.get_mut(self.key) {
                     node.set_attr("value", &v);
                 }

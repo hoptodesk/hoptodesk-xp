@@ -281,7 +281,7 @@ view.windowMinSize = (300, 450);
                 <div class="id-info">
                     <div class="peer-name" id="peer-name">__PEER_NAME__</div>
                     <div class="peer-id">(__PEER_ID__)</div>
-                    <div class="connected-time">Connected&#160;<span id="time">00:00:00</span></div>
+                    <div class="connected-time" id="connected-time" style="display:none">Connected&#160;<span id="time">00:00:00</span></div>
                 </div>
             </div>
 
@@ -327,6 +327,8 @@ view.windowMinSize = (300, 450);
     <div id="disconnect-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="chat-send-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
     <div id="perm-flag" style="visibility:hidden;height:0;overflow:hidden;"></div>
+    <div id="invite-mode" style="visibility:hidden;height:0;overflow:hidden;">__INVITE__</div>
+    <div id="invite-text" style="visibility:hidden;height:0;overflow:hidden;">__INVITE_TEXT__</div>
 
     <script type="text/tiscript">
         var show_chat = false;
@@ -389,10 +391,10 @@ view.windowMinSize = (300, 450);
 
         function sendChat() {
             var input = $(#chat-input);
-            var text = input.text.trim();
+            var text = (input.value || "").trim();
             if (text.length > 0) {
                 $(#chat-send-flag).text = text;
-                input.text = "";
+                input.value = "";
             }
         }
 
@@ -424,6 +426,12 @@ view.windowMinSize = (300, 450);
         event click $(#perm-audio) { togglePerm(this, "audio"); }
         event click $(#perm-file) { togglePerm(this, "file"); }
         event click $(#perm-restart) { togglePerm(this, "restart"); }
+
+        if ($(#invite-mode).text == "true") {
+            $(#cm-status).text = $(#invite-text).text;
+            $(div.perm-label).style#display = "none";
+            $(div.permissions).style#display = "none";
+        }
 
         function self.closing() {
             view.windowState = View.WINDOW_HIDDEN;

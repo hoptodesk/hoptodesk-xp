@@ -581,7 +581,7 @@ fn handle_relay_connection(
         stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
 
         let stop = Arc::new(AtomicBool::new(false));
-        if let Err(e) = server::run_session_public(&mut stream, &my_id, &password, &pk, &stop) {
+        if let Err(e) = server::run_session_public(&mut stream, &my_id, &password, &pk, None, &stop) {
             crate::config::write_log(&format!("[relay] Session error: {}", e));
         }
         crate::config::write_log(&format!("[relay] Session ended"));
