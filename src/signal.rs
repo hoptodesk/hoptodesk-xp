@@ -47,7 +47,7 @@ pub fn api_get() -> Result<String, String> {
 static FORCE_API_REFRESH: AtomicBool = AtomicBool::new(false);
 const API_CACHE_MAX_AGE_SECS: u64 = 6 * 3600;
 
-fn now_unix() -> u64 {
+pub(crate) fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

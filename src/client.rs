@@ -1030,10 +1030,6 @@ fn run_client_inner(
                         }
                     }
                 }
-                Some(message_proto::message::Union::FileAction(fa)) => {
-
-                    handle_file_action_from_server(fa, &stream);
-                }
                 Some(message_proto::message::Union::TestDelay(td)) => {
 
                     let mut resp = message_proto::TestDelay::new();
@@ -1551,125 +1547,6 @@ fn vk_to_chr(vk: u32) -> Option<u32> {
         0xDD => Some(']' as u32),
         0xDE => Some('\'' as u32),
         _ => None,
-    }
-}
-
-fn handle_file_action_from_server(fa: message_proto::FileAction, stream: &Arc<Mutex<FramedStream>>) {
-    match fa.union {
-        Some(message_proto::file_action::Union::ReadDir(rd)) => {
-            let fd = if rd.path.is_empty() {
-                crate::file_transfer::get_drives()
-            } else {
-                crate::file_transfer::read_dir_to_proto(&rd.path, rd.include_hidden)
-                    .unwrap_or_else(|_| {
-                        let mut fd = message_proto::FileDirectory::new();
-                        fd.path = rd.path;
-                        fd
-                    })
-            };
-            let mut fr = message_proto::FileResponse::new();
-            fr.set_dir(fd);
-            let mut msg = message_proto::Message::new();
-            msg.set_file_response(fr);
-            if let Ok(bytes) = msg.write_to_bytes() {
-                if let Ok(mut s) = stream.lock() {
-                    let _ = s.send_msg(&bytes);
-                }
-            }
-        }
-        Some(message_proto::file_action::Union::Send(ref send)) => {
-            crate::config::write_log(&format!("[client] Server requesting send: id={} path={}", send.id, send.path));
-
-            let path = &send.path;
-            let id = send.id;
-            let file_num = send.file_num;
-
-            if std::path::Path::new(path).is_file() {
-                let mut offset: u64 = 0;
-                let mut blk_id: u32 = 0;
-                let mut had_error = false;
-                loop {
-                    match crate::file_transfer::read_file_block(path, offset) {
-                        Ok(data) => {
-                            if data.is_empty() { break; }
-                            let data_len = data.len() as u64;
-                            let mut block = message_proto::FileTransferBlock::new();
-                            block.id = id;
-                            block.file_num = file_num;
-                            block.data = data.into();
-                            block.blk_id = blk_id;
-                            let mut fr = message_proto::FileResponse::new();
-                            fr.set_block(block);
-                            let mut msg = message_proto::Message::new();
-                            msg.set_file_response(fr);
-                            if let Ok(bytes) = msg.write_to_bytes() {
-                                if let Ok(mut s) = stream.lock() {
-                                    let _ = s.send_msg(&bytes);
-                                }
-                            }
-                            offset += data_len;
-                            blk_id += 1;
-                        }
-                        Err(e) => {
-                            crate::config::write_log(&format!("[client] Error reading file {}: {}", path, e));
-                            let mut err = message_proto::FileTransferError::new();
-                            err.id = id;
-                            err.file_num = file_num;
-                            err.error = format!("{}", e);
-                            let mut fr = message_proto::FileResponse::new();
-                            fr.set_error(err);
-                            let mut msg = message_proto::Message::new();
-                            msg.set_file_response(fr);
-                            if let Ok(bytes) = msg.write_to_bytes() {
-                                if let Ok(mut s) = stream.lock() {
-                                    let _ = s.send_msg(&bytes);
-                                }
-                            }
-                            had_error = true;
-                            break;
-                        }
-                    }
-                }
-                if !had_error {
-                    let mut done = message_proto::FileTransferDone::new();
-                    done.id = id;
-                    done.file_num = file_num;
-                    let mut fr = message_proto::FileResponse::new();
-                    fr.set_done(done);
-                    let mut msg = message_proto::Message::new();
-                    msg.set_file_response(fr);
-                    if let Ok(bytes) = msg.write_to_bytes() {
-                        if let Ok(mut s) = stream.lock() {
-                            let _ = s.send_msg(&bytes);
-                        }
-                    }
-                    crate::config::write_log(&format!("[client] File send complete for id={}", id));
-                }
-            } else {
-                crate::config::write_log(&format!("[client] Send path is not a file: {}", path));
-                let mut err = message_proto::FileTransferError::new();
-                err.id = id;
-                err.file_num = file_num;
-                err.error = "Not a file".to_string();
-                let mut fr = message_proto::FileResponse::new();
-                fr.set_error(err);
-                let mut msg = message_proto::Message::new();
-                msg.set_file_response(fr);
-                if let Ok(bytes) = msg.write_to_bytes() {
-                    if let Ok(mut s) = stream.lock() {
-                        let _ = s.send_msg(&bytes);
-                    }
-                }
-            }
-        }
-        other => {
-            let name = match &other {
-                Some(message_proto::file_action::Union::Receive(_)) => "Receive",
-                Some(message_proto::file_action::Union::Cancel(_)) => "Cancel",
-                _ => "Unknown",
-            };
-            crate::config::write_log(&format!("[client] Unhandled FileAction from server: {}", name));
-        }
     }
 }
 

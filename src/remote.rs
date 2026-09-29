@@ -547,41 +547,11 @@ unsafe extern "system" fn remote_timer_callback(
         if !txt.is_empty() {
             let _ = el.set_text("");
             crate::config::write_log("[remote] Switch Sides requested");
-
-            let uuid_bytes = crate::config::generate_random_bytes(16);
-
-            let uuid_str = format!(
-                "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-                uuid_bytes[0], uuid_bytes[1], uuid_bytes[2], uuid_bytes[3],
-                uuid_bytes[4], uuid_bytes[5], uuid_bytes[6], uuid_bytes[7],
-                uuid_bytes[8], uuid_bytes[9], uuid_bytes[10], uuid_bytes[11],
-                uuid_bytes[12], uuid_bytes[13], uuid_bytes[14], uuid_bytes[15]
-            );
-
-            client::send_switch_sides_request_bytes(client_state, &uuid_bytes);
-
-            if let Ok(mut cs) = client_state.lock() {
-                cs.status = "closed".to_string();
-            }
-
             if let Some(ref target) = CONNECT_TARGET_ID {
-                let exe = std::env::current_exe().unwrap_or_default();
-                crate::config::write_log(&format!("[remote] Spawning switch sides connection to {} with UUID {}", target, uuid_str));
-                let _ = std::process::Command::new(&exe)
-                    .args(["--connect", target, "--switch_uuid", &uuid_str])
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn();
+                let uuid_bytes = crate::config::generate_random_bytes(16);
+                crate::cm::record_switch_sides(&uuid_bytes, target);
+                client::send_switch_sides_request_bytes(client_state, &uuid_bytes);
             }
-
-            close_remote_window();
-
-            std::thread::spawn(|| {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                std::process::exit(0);
-            });
-            return;
         }
     }
 
@@ -1008,13 +978,28 @@ unsafe fn process_file_responses(
 
     for fr in responses {
         match fr.union {
-            Some(message_proto::file_response::Union::Dir(fd)) => {
+            Some(message_proto::file_response::Union::Dir(mut fd)) => {
                 crate::config::write_log(&format!("[remote/ft] Dir response: id={} path={} entries={}", fd.id, fd.path, fd.entries.len()));
                 for (i, e) in fd.entries.iter().take(5).enumerate() {
                     crate::config::write_log(&format!("[remote/ft]   [{}] name={} type={:?} size={}", i, e.name, e.entry_type, e.size));
                 }
 
                 let jobs = FT_JOBS.as_mut().unwrap();
+                if jobs.contains_key(&fd.id) && !crate::file_transfer::download_names_safe(&fd.entries) {
+                    crate::config::write_log(&format!("[remote/ft] Refused job {}: unsafe file name in the list", fd.id));
+                    jobs.remove(&fd.id);
+                    let mut cancel = message_proto::FileTransferCancel::new();
+                    cancel.id = fd.id;
+                    let mut fa = message_proto::FileAction::new();
+                    fa.set_cancel(cancel);
+                    client::send_file_action(client_state, fa);
+                    let _ = root.call_method("jobError", &[
+                        sciter::Value::from(fd.id),
+                        sciter::Value::from("Unsafe file name"),
+                        sciter::Value::from(0),
+                    ]);
+                    continue;
+                }
                 if let Some(job) = jobs.get_mut(&fd.id) {
                     let base = &job.dest_path;
                     let base_path = std::path::Path::new(base);
@@ -1045,6 +1030,8 @@ unsafe fn process_file_responses(
                     crate::config::write_log(&format!("[remote/ft] Populated {} file paths for job {}", file_paths.len(), fd.id));
                     job.files = file_paths;
                     job.offsets = vec![0u64; fd.entries.len()];
+                } else {
+                    fd.entries.retain(crate::file_transfer::is_safe_listing_entry);
                 }
 
                 let val = crate::file_transfer::file_directory_to_value(&fd);

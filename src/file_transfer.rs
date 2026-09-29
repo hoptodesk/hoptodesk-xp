@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 const BLOCK_SIZE: usize = 128 * 1024;
+const MAX_DECOMPRESSED_SIZE: u64 = 16 * 1024 * 1024;
 
 pub fn read_dir_to_proto(path: &str, include_hidden: bool) -> io::Result<message_proto::FileDirectory> {
     let dir = Path::new(path);
@@ -150,9 +151,11 @@ pub fn zstd_wrap_raw(data: &[u8]) -> Vec<u8> {
 pub fn zstd_decompress(data: &[u8]) -> Vec<u8> {
     use std::io::Read;
     match ruzstd::StreamingDecoder::new(data) {
-        Ok(mut decoder) => {
+        Ok(decoder) => {
             let mut out = Vec::new();
-            if decoder.read_to_end(&mut out).is_ok() {
+            if decoder.take(MAX_DECOMPRESSED_SIZE + 1).read_to_end(&mut out).is_ok()
+                && out.len() as u64 <= MAX_DECOMPRESSED_SIZE
+            {
                 out
             } else {
                 Vec::new()
@@ -181,6 +184,28 @@ pub fn write_file_block(path: &str, data: &[u8], offset: u64) -> io::Result<()> 
     f.seek(SeekFrom::Start(offset))?;
     f.write_all(data)?;
     Ok(())
+}
+
+pub fn is_safe_name(name: &str) -> bool {
+    let b = name.as_bytes();
+    !name.contains('\0')
+        && !name.starts_with(['/', '\\'])
+        && !(b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
+        && !name.split(['/', '\\']).any(|s| s == "..")
+}
+
+pub fn download_names_safe(entries: &[message_proto::FileEntry]) -> bool {
+    (entries.len() == 1 && entries[0].name.is_empty())
+        || entries.iter().all(|e| !e.name.is_empty() && is_safe_name(&e.name))
+}
+
+pub fn is_safe_listing_entry(e: &message_proto::FileEntry) -> bool {
+    let b = e.name.as_bytes();
+    let is_drive = e.entry_type.enum_value_or_default() == message_proto::FileType::DirDrive
+        && b.len() == 2
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':';
+    !e.name.is_empty() && (is_drive || is_safe_name(&e.name))
 }
 
 pub fn get_drives() -> message_proto::FileDirectory {

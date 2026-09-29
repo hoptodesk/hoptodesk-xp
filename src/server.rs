@@ -181,7 +181,7 @@ pub fn accept_connection(
 pub fn run_session_public(
     stream: &mut FramedStream,
     my_id: &str,
-    password: &str,
+    _password: &str,
     pk: &[u8],
     direct_addr: Option<String>,
     stop: &Arc<AtomicBool>,
@@ -357,20 +357,21 @@ pub fn run_session_public(
 
             }
             Some(message_proto::message::Union::SwitchSidesResponse(ref ssr)) => {
-
-                if let Some(switch_lr) = ssr.lr.as_ref() {
-                    let uuid_hex: String = ssr.uuid.iter().map(|b| format!("{:02x}", b)).collect();
-                    crate::config::write_log(&format!("[server] SwitchSidesResponse received, UUID={}", uuid_hex));
-
-                    let owned_lr: message_proto::LoginRequest = (*switch_lr).clone();
-                    lr = owned_lr;
-                    login_attempt = 0;
-
+                let switch_lr = ssr.lr.clone().unwrap_or_default();
+                if cm::take_switch_sides(&ssr.uuid, &switch_lr.my_id) {
+                    crate::config::write_log(&format!("[server] Switch Sides accepted for {}", switch_lr.my_id));
+                    lr = switch_lr;
                     break;
-                } else {
-                    crate::config::write_log("[server] SwitchSidesResponse missing LoginRequest");
-                    continue;
                 }
+                crate::config::write_log(&format!("[server] Switch Sides refused for {}: unknown or expired request", switch_lr.my_id));
+                let mut resp = message_proto::LoginResponse::new();
+                resp.union = Some(message_proto::login_response::Union::Error(
+                    "Connection failed".to_string(),
+                ));
+                let mut msg = message_proto::Message::new();
+                msg.set_login_response(resp);
+                stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+                return Ok(());
             }
             Some(message_proto::message::Union::InviteRequest(req)) => {
                 let req = req.clone();
@@ -418,6 +419,7 @@ pub fn run_session_public(
 
         if password_ok {
             crate::config::write_log(&format!("[server] Password OK"));
+            count_temporary_password_attempt(current_password, true);
             break;
         }
 
@@ -487,14 +489,16 @@ pub fn run_session_public(
                             Some(message_proto::message::Union::LoginRequest(new_lr)) => {
 
                                 if new_lr.password.len() == 32 {
-                                    let exp1 = compute_password_hash(password, &salt, &challenge);
-                                    let exp1p = compute_prehashed_check(password, &challenge);
+                                    let cfg_now = crate::config::Config::load();
+                                    let exp1 = compute_password_hash(&cfg_now.password, &salt, &challenge);
+                                    let exp1p = compute_prehashed_check(&cfg_now.password, &challenge);
                                     let mut pw_ok = new_lr.password[..] == exp1[..] || new_lr.password[..] == exp1p[..];
-                                    if !pw_ok && !perm_pw.is_empty() {
-                                        let exp2 = compute_password_hash(&perm_pw, &salt, &challenge);
-                                        let exp2p = compute_prehashed_check(&perm_pw, &challenge);
+                                    if !pw_ok && !cfg_now.permanent_password.is_empty() {
+                                        let exp2 = compute_password_hash(&cfg_now.permanent_password, &salt, &challenge);
+                                        let exp2p = compute_prehashed_check(&cfg_now.permanent_password, &challenge);
                                         pw_ok = new_lr.password[..] == exp2[..] || new_lr.password[..] == exp2p[..];
                                     }
+                                    count_temporary_password_attempt(&cfg_now.password, pw_ok);
                                     if pw_ok {
                                         crate::config::write_log(&format!("[server] Password received while CM open — accepting"));
 
@@ -555,6 +559,7 @@ pub fn run_session_public(
         } else {
 
             crate::config::write_log(&format!("[server] Wrong password (attempt {}), sending error and waiting for retry", login_attempt));
+            count_temporary_password_attempt(current_password, false);
             let mut resp = message_proto::LoginResponse::new();
             resp.union = Some(message_proto::login_response::Union::Error(
                 "Wrong Password".to_string(),
@@ -878,6 +883,30 @@ fn handle_invite_request(stream: &mut FramedStream, req: &message_proto::InviteR
     Ok(())
 }
 
+fn count_temporary_password_attempt(current_password: &str, success: bool) {
+    const MAX_CONSECUTIVE_FAILURES: u32 = 10;
+    static ATTEMPTS: std::sync::Mutex<(String, u32)> = std::sync::Mutex::new((String::new(), 0));
+
+    if current_password.is_empty() {
+        return;
+    }
+    let mut attempts = ATTEMPTS.lock().unwrap_or_else(|e| e.into_inner());
+    if attempts.0 != current_password {
+        *attempts = (current_password.to_string(), 0);
+    }
+    if success {
+        attempts.1 = 0;
+        return;
+    }
+    attempts.1 += 1;
+    if attempts.1 < MAX_CONSECUTIVE_FAILURES {
+        return;
+    }
+    attempts.1 = 0;
+    crate::config::write_log(&format!("[server] {} wrong passwords in a row", MAX_CONSECUTIVE_FAILURES));
+    rotate_password_if_needed();
+}
+
 fn rotate_password_if_needed() {
     let cfg2 = crate::config::Config2::load();
     let ua = cfg2.get_option("unattended-access");
@@ -1038,6 +1067,7 @@ fn run_video_input_loop(
                     if let Some(message_proto::message::Union::Misc(ref misc)) = msg.union {
                         if let Some(message_proto::misc::Union::SwitchSidesRequest(ref req)) = misc.union {
                             crate::config::write_log(&format!("[server] Switch Sides request received from {}", peer_id));
+                            send_session_close(stream);
 
                             if let Ok(uuid_bytes) = std::convert::TryInto::<[u8; 16]>::try_into(req.uuid.to_vec()) {
                                 let uuid_str = format!(

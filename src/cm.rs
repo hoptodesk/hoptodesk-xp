@@ -207,6 +207,37 @@ pub fn signal_cm_ended(session_id: &str) {
     crate::config::write_log(&format!("[cm] Wrote session-ended signal for {}", session_id));
 }
 
+const SWITCH_SIDES_VALID_SECS: u64 = 60;
+
+fn switch_sides_path(uuid: &[u8]) -> PathBuf {
+    let hex: String = uuid.iter().map(|b| format!("{:02x}", b)).collect();
+    cm_temp_dir().join(format!("hoptodesk_cm_{}.switch", hex))
+}
+
+pub fn record_switch_sides(uuid: &[u8], peer_id: &str) {
+    let path = switch_sides_path(uuid);
+    let _ = std::fs::write(&path, format!("{}\n{}", peer_id, crate::signal::now_unix()));
+    make_users_writable(&path);
+}
+
+pub fn take_switch_sides(uuid: &[u8], peer_id: &str) -> bool {
+    if uuid.len() != 16 {
+        return false;
+    }
+    let path = switch_sides_path(uuid);
+    let data = match std::fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let _ = std::fs::remove_file(&path);
+    let (recorded_id, recorded_at) = data.split_once('\n').unwrap_or_default();
+    let age = recorded_at
+        .parse::<u64>()
+        .ok()
+        .and_then(|at| crate::signal::now_unix().checked_sub(at));
+    recorded_id == peer_id && age.map_or(false, |a| a < SWITCH_SIDES_VALID_SECS)
+}
+
 pub fn cleanup_runtime_dir() {
     let dir = cm_temp_dir();
     let entries = match std::fs::read_dir(&dir) {

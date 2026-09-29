@@ -10,6 +10,7 @@ const FILECONTENTS_FORMAT_NAME: &str = "FileContents";
 
 const FILECONTENTS_SIZE: i32 = 1;
 const FILECONTENTS_RANGE: i32 = 2;
+const MAX_FILECONTENTS_RANGE: u64 = 16 * 1024 * 1024;
 
 const FD_ATTRIBUTES: u32 = 0x04;
 const FD_FILESIZE: u32 = 0x40;
@@ -210,6 +211,35 @@ fn parse_file_group_descriptor(data: &[u8]) -> Vec<RecvFileEntry> {
     entries
 }
 
+fn is_safe_clip_name(name: &str) -> bool {
+    name.encode_utf16().count() < 260
+        && !name.starts_with('/')
+        && !name.starts_with('\\')
+        && name.split(|c| c == '/' || c == '\\').all(is_safe_clip_component)
+}
+
+fn is_safe_clip_component(part: &str) -> bool {
+    if part.is_empty() || part.starts_with(' ') || part.ends_with(' ') || part.ends_with('.') {
+        return false;
+    }
+    if part.chars().any(|c| c < ' ' || "<>:\"|?*".contains(c)) {
+        return false;
+    }
+    let upper = part.to_ascii_uppercase();
+    let base = upper.split('.').next().unwrap_or("");
+    if matches!(upper.as_str(), "CONIN$" | "CONOUT$" | "CLOCK$")
+        || matches!(base, "CON" | "PRN" | "AUX" | "NUL")
+    {
+        return false;
+    }
+    let mut chars = base.chars();
+    let prefix: String = chars.by_ref().take(3).collect();
+    let digit = chars.next();
+    !((prefix == "COM" || prefix == "LPT")
+        && chars.next().is_none()
+        && matches!(digit, Some('1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}')))
+}
+
 pub fn check_clipboard_files_change() -> Option<message_proto::Message> {
     let paths = platform::get_clipboard_file_paths()?;
     if paths.is_empty() {
@@ -331,13 +361,16 @@ fn handle_file_contents_request(
     } else if req.dw_flags == FILECONTENTS_RANGE {
         let position =
             (req.n_position_high as u64) << 32 | (req.n_position_low as u64 & 0xFFFFFFFF);
-        let requested = req.cb_requested as usize;
+        let requested = (req.cb_requested as u32 as u64).min(file.size.saturating_sub(position));
 
         if file.is_dir {
             return vec![make_file_contents_response(0x1, req.stream_id, vec![])];
         }
+        if requested > MAX_FILECONTENTS_RANGE {
+            return vec![make_file_contents_response(0x2, req.stream_id, vec![])];
+        }
 
-        match read_file_chunk(&file.path, position, requested) {
+        match read_file_chunk(&file.path, position, requested as usize) {
             Ok(data) => vec![make_file_contents_response(0x1, req.stream_id, data)],
             Err(_) => vec![make_file_contents_response(0x2, req.stream_id, vec![])],
         }
@@ -390,6 +423,10 @@ fn handle_format_data_response(
 
     let entries = parse_file_group_descriptor(&resp.format_data);
     if entries.is_empty() {
+        return vec![];
+    }
+    if !entries.iter().all(|e| is_safe_clip_name(&e.name)) {
+        crate::config::write_log("[clipboard] Refused a pasted file list with an unsafe file name");
         return vec![];
     }
 
