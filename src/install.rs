@@ -400,6 +400,26 @@ fn remove_firewall_rule() {
         .output();
 }
 
+fn copy_config_files(src_config: &Path, dst_config: &Path) -> usize {
+    let mut copied = 0;
+    if let Ok(entries) = std::fs::read_dir(src_config) {
+        for entry in entries.flatten() {
+            let src = entry.path();
+            if src.is_file() {
+                let dst = dst_config.join(entry.file_name());
+                for _ in 0..20 {
+                    if std::fs::copy(&src, &dst).is_ok() {
+                        copied += 1;
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
+    copied
+}
+
 pub fn install_me(args: &str, custom_path: &str) -> Result<(), String> {
     crate::config::write_log(&format!("[install] install_me args='{}' path='{}'", args, custom_path));
 
@@ -456,18 +476,33 @@ pub fn install_me(args: &str, custom_path: &str) -> Result<(), String> {
             let src_config = user_app_dir.join("config");
             let dst_config = shared.join("config");
             if src_config.exists() && !dst_config.exists() {
-                let _ = std::fs::create_dir_all(&dst_config);
-                if let Ok(entries) = std::fs::read_dir(&src_config) {
-                    let mut copied = 0;
-                    for entry in entries.flatten() {
-                        let src = entry.path();
-                        if src.is_file() {
-                            let dst = dst_config.join(entry.file_name());
-                            if std::fs::copy(&src, &dst).is_ok() {
-                                copied += 1;
-                            }
+                let staged_config = shared.join(format!("config.new.{}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&staged_config);
+                let mut copied = 0;
+                let mut placed = std::fs::create_dir(&staged_config);
+                if placed.is_ok() {
+                    copied = copy_config_files(&src_config, &staged_config);
+                    for _ in 0..50 {
+                        placed = std::fs::rename(&staged_config, &dst_config);
+                        if placed.is_ok() || dst_config.exists() {
+                            break;
                         }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
                     }
+                }
+                if let Err(e) = &placed {
+                    crate::config::write_log(&format!(
+                        "[install] Could not move {} into place: {}",
+                        staged_config.display(),
+                        e
+                    ));
+                    let _ = std::fs::remove_dir_all(&staged_config);
+                    placed = std::fs::create_dir(&dst_config);
+                    if placed.is_ok() {
+                        copied = copy_config_files(&src_config, &dst_config);
+                    }
+                }
+                if placed.is_ok() {
                     crate::config::write_log(&format!(
                         "[install] Migrated {} config file(s) from {} to {}",
                         copied,
@@ -795,14 +830,14 @@ fn run_service_workload(_stop: Arc<AtomicBool>) {
     let cfg = crate::config::Config::load();
     let my_id = cfg.id.clone();
     let password = cfg.password.clone();
-    let pk = cfg.key_pair.1.clone();
+    let key_pair = cfg.key_pair.clone();
 
     {
         let my_id = my_id.clone();
         let password = password.clone();
-        let pk = pk.clone();
+        let key_pair = key_pair.clone();
         std::thread::spawn(move || {
-            crate::server::run_direct_server(my_id, password, pk);
+            crate::server::run_direct_server(my_id, password, key_pair);
         });
     }
 
@@ -811,7 +846,7 @@ fn run_service_workload(_stop: Arc<AtomicBool>) {
     });
 
     let signal_state = Arc::new(std::sync::Mutex::new(crate::signal::SignalState::default()));
-    crate::signal::run_signal_loop(my_id, password, pk, signal_state);
+    crate::signal::run_signal_loop(my_id, password, key_pair, signal_state);
 }
 
 pub fn run_as_service() {

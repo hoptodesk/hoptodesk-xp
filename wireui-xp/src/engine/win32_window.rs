@@ -20,6 +20,7 @@ use winapi::shared::windef::{HWND, POINT, RECT};
 use winapi::um::wingdi::{
     StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY,
 };
+use winapi::um::shellapi::{DragAcceptFiles, DragFinish, DragQueryFileW, DragQueryPoint, HDROP};
 use winapi::um::winuser::*;
 
 const TICK_TIMER_ID: usize = 0x7715;
@@ -361,6 +362,46 @@ fn lparam_xy(lparam: LPARAM) -> (f32, f32) {
 fn hit_at(engine: &EngineRef, x: f32, y: f32) -> Option<NodeKey> {
     let e = engine.borrow();
     hit_test_ordered(&e.doc, &e.screen_rects, &e.screen_order, x, y)
+}
+
+unsafe fn on_drop_files(hwnd: HWND, hdrop: HDROP) {
+    use std::os::windows::ffi::OsStringExt;
+    let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, std::ptr::null_mut(), 0);
+    let mut paths = Vec::new();
+    for i in 0..count {
+        let len = DragQueryFileW(hdrop, i, std::ptr::null_mut(), 0);
+        let mut buf = vec![0u16; len as usize + 1];
+        let got = DragQueryFileW(hdrop, i, buf.as_mut_ptr(), len + 1);
+        buf.truncate(got as usize);
+        if !buf.is_empty() {
+            paths.push(std::path::PathBuf::from(std::ffi::OsString::from_wide(&buf)));
+        }
+    }
+    let mut pt = POINT { x: 0, y: 0 };
+    let in_client_area = DragQueryPoint(hdrop, &mut pt) != 0;
+    DragFinish(hdrop);
+    if paths.is_empty() || !in_client_area {
+        return;
+    }
+    let Some(state) = state_for(hwnd) else {
+        return;
+    };
+    let engine = match state.try_borrow() {
+        Ok(st) => st.engine.clone(),
+        Err(_) => return,
+    };
+    host::set_current_engine(&engine);
+    host::set_current_window_hwnd(hwnd as usize);
+    let (x, y) = (pt.x as f32, pt.y as f32);
+    let Some(target) = host::file_drop_target_at(&engine, x, y) else {
+        return;
+    };
+    with_interp(|interp| {
+        host::dispatch_os_file_drag(interp, &engine, "drop", target, x, y, &paths);
+        host::drain_events(interp, &engine);
+    });
+    after_script(hwnd, &state);
+    invalidate(hwnd);
 }
 
 fn cursor_to_idc(c: super::style::Cursor) -> *const u16 {
@@ -823,6 +864,10 @@ unsafe extern "system" fn wndproc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if msg == WM_DROPFILES {
+        on_drop_files(hwnd, wparam as HDROP);
+        return 0;
+    }
     let Some(state) = state_for(hwnd) else {
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     };
@@ -2038,6 +2083,9 @@ pub fn run_window_source(
     }));
     host::set_scroll_ease_default(1.0);
     REGISTRY.with(|r| r.borrow_mut().insert(hwnd as usize, state.clone()));
+    unsafe {
+        DragAcceptFiles(hwnd, host::has_file_drop_target(&engine) as i32);
+    }
 
     // Layout-only refresh for script geometry reads (element.box) that land
     // between a DOM rebuild and the next paint.

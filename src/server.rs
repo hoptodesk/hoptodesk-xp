@@ -11,7 +11,7 @@ use protobuf::Message;
 use std::collections::HashMap;
 use std::io;
 use std::net::TcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -50,7 +50,7 @@ pub(crate) fn send_session_close(stream: &mut FramedStream) {
 pub fn run_direct_server(
     my_id: String,
     password: String,
-    pk: Vec<u8>,
+    key_pair: (Vec<u8>, Vec<u8>),
 ) {
     loop {
         let cfg = crate::config::Config2::load();
@@ -109,14 +109,14 @@ pub fn run_direct_server(
 
                     let my_id = my_id.clone();
                     let password = password.clone();
-                    let pk = pk.clone();
+                    let key_pair = key_pair.clone();
                     std::thread::spawn(move || {
                         let direct_addr = tcp_stream.local_addr().ok().map(|a| a.ip().to_string());
                         let mut stream = FramedStream::from_tcp(tcp_stream);
                         stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
                         stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
                         let stop = Arc::new(AtomicBool::new(false));
-                        if let Err(e) = run_session_public(&mut stream, &my_id, &password, &pk, direct_addr, &stop) {
+                        if let Err(e) = run_session_public(&mut stream, &my_id, &password, &key_pair, direct_addr, &stop) {
                             crate::config::write_log(&format!("[direct] Session error: {}", e));
                         }
                         crate::config::write_log("[direct] Session ended");
@@ -138,7 +138,7 @@ pub fn accept_connection(
     listener: TcpListener,
     my_id: &str,
     password: &str,
-    pk: &[u8],
+    key_pair: &(Vec<u8>, Vec<u8>),
     stop: Arc<AtomicBool>,
 ) {
 
@@ -157,7 +157,7 @@ pub fn accept_connection(
                 stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
                 stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
 
-                if let Err(e) = run_session_public(&mut stream, my_id, password, pk, None, &stop) {
+                if let Err(e) = run_session_public(&mut stream, my_id, password, key_pair, None, &stop) {
                     crate::config::write_log(&format!("[server] Session error: {}", e));
                 }
                 crate::config::write_log(&format!("[server] Session ended"));
@@ -182,14 +182,15 @@ pub fn run_session_public(
     stream: &mut FramedStream,
     my_id: &str,
     _password: &str,
-    pk: &[u8],
+    key_pair: &(Vec<u8>, Vec<u8>),
     direct_addr: Option<String>,
     stop: &Arc<AtomicBool>,
 ) -> io::Result<()> {
 
+    stream.set_max_frame_len(crate::network::PRE_LOGIN_MAX_FRAME_LEN);
     let config = crate::config::Config::load();
     let config_salt = config.salt.clone();
-    let (signing_sk, signing_pk) = (config.key_pair.0.clone(), config.key_pair.1.clone());
+    let (signing_sk, signing_pk) = key_pair.clone();
 
     let (eph_sk, eph_pk) = crate::crypto::x25519_keypair();
 
@@ -640,6 +641,7 @@ pub fn run_session_public(
     }
 
     crate::config::write_log(&format!("[server] Password OK, sending PeerInfo"));
+    stream.set_max_frame_len(crate::network::MAX_FRAME_LEN);
 
     let is_file_transfer = lr.union.as_ref().map_or(false, |u| {
         matches!(u, message_proto::login_request::Union::FileTransfer(_))
@@ -969,9 +971,11 @@ fn run_video_input_loop(
 ) -> io::Result<()> {
     struct SessionEndGuard {
         lock_after_end: std::rc::Rc<std::cell::Cell<bool>>,
+        session_id: u32,
     }
     impl Drop for SessionEndGuard {
         fn drop(&mut self) {
+            release_mouse_owner(self.session_id);
             input::release_all_held_keys();
             crate::privacy::turn_off();
             platform::block_input(false);
@@ -982,7 +986,8 @@ fn run_video_input_loop(
         }
     }
     let lock_after_end = std::rc::Rc::new(std::cell::Cell::new(false));
-    let _session_end_guard = SessionEndGuard { lock_after_end: lock_after_end.clone() };
+    let session_id = NEXT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
+    let _session_end_guard = SessionEndGuard { lock_after_end: lock_after_end.clone(), session_id };
 
     if displays.is_empty() {
         return Err(io::Error::new(io::ErrorKind::Other, "No displays found"));
@@ -1210,6 +1215,7 @@ fn run_video_input_loop(
                         }
                     } else if let Some(reply) = handle_peer_message(
                         &msg,
+                        session_id,
                         screen_width,
                         screen_height,
                         keyboard_enabled && !viewer_view_only,
@@ -1474,10 +1480,10 @@ fn run_video_input_loop(
     Ok(())
 }
 
-fn handle_peer_message(msg: &message_proto::Message, screen_w: i32, screen_h: i32, keyboard_enabled: bool, clipboard_enabled: bool) -> Option<message_proto::Message> {
+fn handle_peer_message(msg: &message_proto::Message, session_id: u32, screen_w: i32, screen_h: i32, keyboard_enabled: bool, clipboard_enabled: bool) -> Option<message_proto::Message> {
     match &msg.union {
         Some(message_proto::message::Union::MouseEvent(me)) => {
-            if keyboard_enabled {
+            if keyboard_enabled && claim_mouse(me, session_id) {
                 handle_mouse_event(me, screen_w, screen_h);
             }
         }
@@ -1512,10 +1518,30 @@ const MOUSE_TYPE_DOWN: i32 = 1;
 const MOUSE_TYPE_UP: i32 = 2;
 const MOUSE_TYPE_WHEEL: i32 = 3;
 const MOUSE_TYPE_TRACKPAD: i32 = 4;
+const WHEEL_DELTA: i32 = 120;
 
 const MOUSE_BUTTON_LEFT: i32 = 0x01;
 const MOUSE_BUTTON_RIGHT: i32 = 0x02;
 const MOUSE_BUTTON_WHEEL: i32 = 0x04;
+
+static NEXT_SESSION_ID: AtomicU32 = AtomicU32::new(1);
+static MOUSE_OWNER_SESSION: AtomicU32 = AtomicU32::new(0);
+
+fn claim_mouse(me: &message_proto::MouseEvent, session_id: u32) -> bool {
+    let owner = MOUSE_OWNER_SESSION.load(Ordering::SeqCst);
+    if owner == 0 || owner == session_id || me.mask & 0x7 == MOUSE_TYPE_DOWN {
+        MOUSE_OWNER_SESSION.store(session_id, Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
+}
+
+fn release_mouse_owner(session_id: u32) {
+    MOUSE_OWNER_SESSION
+        .compare_exchange(session_id, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .ok();
+}
 
 fn handle_mouse_event(me: &message_proto::MouseEvent, _screen_w: i32, _screen_h: i32) {
     let mask = me.mask;
@@ -1557,9 +1583,9 @@ fn handle_mouse_event(me: &message_proto::MouseEvent, _screen_w: i32, _screen_h:
             }
         }
         MOUSE_TYPE_WHEEL | MOUSE_TYPE_TRACKPAD => {
-
-            let hscroll = -x;
-            let vscroll = y;
+            let wheel_delta = if evt_type == MOUSE_TYPE_WHEEL { WHEEL_DELTA } else { 1 };
+            let hscroll = -x * wheel_delta;
+            let vscroll = y * wheel_delta;
             if vscroll != 0 {
                 input::mouse_scroll(vscroll);
             }

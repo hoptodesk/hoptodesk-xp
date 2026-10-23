@@ -154,7 +154,7 @@ pub fn open_peer_stream(
 
     let mut winner = None;
     if racing_direct {
-        if let Ok(Race::Direct(opt)) = rx.recv_timeout(std::time::Duration::from_millis(1000)) {
+        if let Ok(Race::Direct(opt)) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
             direct_done = true;
             winner = opt;
         }
@@ -484,6 +484,14 @@ unsafe extern "system" fn remote_timer_callback(
         if !txt.is_empty() {
             let _ = el.set_text("");
             handle_key_input(&txt, client_state);
+        }
+    }
+
+    if let Ok(Some(mut el)) = root.find_first("#file-drop-flag") {
+        let txt = el.get_text();
+        if !txt.is_empty() {
+            let _ = el.set_text("");
+            handle_file_drop(&txt, client_state);
         }
     }
 
@@ -1176,10 +1184,9 @@ unsafe fn poll_ft_flags(
         }
     }
 
-    if let Ok(Some(mut el)) = root.find_first("#ft-send-files") {
-        let txt = el.get_text();
+    while let Ok(value) = root.call_method("takeSendFile", &[]) {
+        let txt = value.as_string().unwrap_or_default();
         if !txt.is_empty() {
-            let _ = el.set_text("");
             crate::config::write_log(&format!("[remote/ft] SendFiles raw: '{}'", txt));
             let parts: Vec<&str> = txt.splitn(6, '|').collect();
             if parts.len() >= 6 {
@@ -1347,6 +1354,8 @@ unsafe fn poll_ft_flags(
             } else {
                 crate::config::write_log(&format!("[remote/ft] SendFiles parse error: expected 6 parts, got {}", parts.len()));
             }
+        } else {
+            break;
         }
     }
 
@@ -1572,6 +1581,91 @@ fn handle_mouse_input(text: &str, client_state: &Arc<Mutex<client::ClientState>>
     let mask = (buttons << 3) | event_type;
 
     client::send_mouse_event(client_state, mask, x, y, alt, ctrl, shift);
+}
+
+fn handle_file_drop(text: &str, client_state: &Arc<Mutex<client::ClientState>>) {
+    let mut parts = text.split('|');
+    let x: i32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(-1);
+    let y: i32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(-1);
+    let paths: Vec<String> = parts.filter(|p| !p.is_empty()).map(String::from).collect();
+    if x < 0 || y < 0 || paths.is_empty() {
+        return;
+    }
+    {
+        let Ok(s) = client_state.lock() else {
+            return;
+        };
+        if s.file_transfer_mode
+            || s.peer_platform != "Windows"
+            || !s.keyboard_enabled
+            || !s.file_enabled
+            || !s.clipboard_enabled
+        {
+            return;
+        }
+    }
+    if !crate::clipboard_file::begin_drop() {
+        return;
+    }
+    let cs = client_state.clone();
+    thread::spawn(move || {
+        if let Some(msg) = crate::clipboard_file::announce_dropped_files(&paths) {
+            if client::send_message(&cs, &msg) {
+                wait_for_eager_fetch();
+                client::send_mouse_event(&cs, 0, x, y, false, false, false);
+                client::send_mouse_event(&cs, (1 << 3) | 1, 0, 0, false, false, false);
+                client::send_mouse_event(&cs, (1 << 3) | 2, 0, 0, false, false, false);
+                client::send_paste(&cs);
+                wait_for_requests_to_stop(std::time::Duration::from_secs(3));
+            }
+        }
+        crate::clipboard_file::end_drop();
+    });
+}
+
+fn wait_for_eager_fetch() {
+    use std::time::{Duration, Instant};
+    let first = Instant::now();
+    while crate::clipboard_file::served().0 == 0 {
+        if first.elapsed() > Duration::from_millis(1200) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    let total = crate::clipboard_file::clip_total_bytes();
+    let start = Instant::now();
+    let mut last = crate::clipboard_file::served();
+    let mut last_change = Instant::now();
+    loop {
+        thread::sleep(Duration::from_millis(100));
+        let now = crate::clipboard_file::served();
+        if now != last {
+            last = now;
+            last_change = Instant::now();
+        }
+        let quiet = last_change.elapsed();
+        if (now.1 >= total && quiet > Duration::from_millis(1500))
+            || quiet > Duration::from_secs(15)
+            || start.elapsed() > Duration::from_secs(600)
+        {
+            return;
+        }
+    }
+}
+
+fn wait_for_requests_to_stop(quiet_for: std::time::Duration) {
+    use std::time::{Duration, Instant};
+    let start = Instant::now();
+    let mut last = crate::clipboard_file::served();
+    let mut last_change = Instant::now();
+    while last_change.elapsed() < quiet_for && start.elapsed() < Duration::from_secs(3600) {
+        thread::sleep(Duration::from_millis(100));
+        let now = crate::clipboard_file::served();
+        if now != last {
+            last = now;
+            last_change = Instant::now();
+        }
+    }
 }
 
 fn handle_key_input(text: &str, client_state: &Arc<Mutex<client::ClientState>>) {

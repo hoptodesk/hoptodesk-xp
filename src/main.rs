@@ -483,7 +483,12 @@ fn main() {
     crate::config::write_log(&format!("[main] HopToDesk {} starting", VERSION));
 
     let args: Vec<String> = std::env::args().collect();
-    crate::config::write_log(&format!("[main] CLI args: {:?}", args));
+    let logged_args: Vec<&str> = args
+        .iter()
+        .enumerate()
+        .map(|(i, arg)| if i > 0 && args[i - 1] == "--password" { "***" } else { arg.as_str() })
+        .collect();
+    crate::config::write_log(&format!("[main] CLI args: {:?}", logged_args));
 
     #[cfg(target_os = "windows")]
     if args.len() < 2 || !args[1].starts_with("--") {
@@ -675,7 +680,7 @@ fn run_headless_server() {
     let cfg = config::Config::load();
     let my_id = cfg.id.clone();
     let password = cfg.password.clone();
-    let pk = cfg.key_pair.1.clone();
+    let key_pair = cfg.key_pair.clone();
 
     crate::config::write_log(&format!("[server] Starting headless server, ID={}", my_id));
     crate::config::write_log(&format!("[server] Press Ctrl+C to stop"));
@@ -683,14 +688,14 @@ fn run_headless_server() {
     {
         let my_id = my_id.clone();
         let password = password.clone();
-        let pk = pk.clone();
+        let key_pair = key_pair.clone();
         std::thread::spawn(move || {
-            server::run_direct_server(my_id, password, pk);
+            server::run_direct_server(my_id, password, key_pair);
         });
     }
 
     let signal_state = Arc::new(Mutex::new(signal::SignalState::default()));
-    signal::run_signal_loop(my_id, password, pk, signal_state);
+    signal::run_signal_loop(my_id, password, key_pair, signal_state);
 }
 
 fn ui_shared_resources() -> Vec<(&'static str, &'static [u8])> {
@@ -825,16 +830,16 @@ fn run_main_ui() {
     {
         let state_clone = state.clone();
         thread::spawn(move || {
-            let (my_id, password, pk, signal_state) = {
+            let (my_id, password, key_pair, signal_state) = {
                 let s = state_clone.lock().unwrap();
                 (
                     s.config.id.clone(),
                     s.config.password.clone(),
-                    s.config.key_pair.1.clone(),
+                    s.config.key_pair.clone(),
                     s.signal_state.clone(),
                 )
             };
-            signal::run_signal_loop_ex(my_id, password, pk, signal_state, true);
+            signal::run_signal_loop_ex(my_id, password, key_pair, signal_state, true);
         });
     }
     if !service_running {
@@ -842,15 +847,15 @@ fn run_main_ui() {
         {
             let state_clone = state.clone();
             thread::spawn(move || {
-                let (my_id, password, pk) = {
+                let (my_id, password, key_pair) = {
                     let s = state_clone.lock().unwrap();
                     (
                         s.config.id.clone(),
                         s.config.password.clone(),
-                        s.config.key_pair.1.clone(),
+                        s.config.key_pair.clone(),
                     )
                 };
-                server::run_direct_server(my_id, password, pk);
+                server::run_direct_server(my_id, password, key_pair);
             });
         }
 

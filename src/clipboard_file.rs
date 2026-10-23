@@ -1,6 +1,7 @@
 
 use crate::platform;
 use crate::protocol::message_proto;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 const FILEDESCRIPTOR_FORMAT_ID: i32 = 49334;
@@ -46,6 +47,32 @@ lazy_static::lazy_static! {
     static ref CLIP_FILES: Mutex<Vec<ClipFileEntry>> = Mutex::new(Vec::new());
     static ref LAST_FILE_PATHS: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static ref RECV_STATE: Mutex<Option<RecvState>> = Mutex::new(None);
+}
+
+static SERVED_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static SERVED_BYTES: AtomicU64 = AtomicU64::new(0);
+static DROP_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static FORGET_LAST_TEXT: AtomicBool = AtomicBool::new(false);
+const MAX_SERVED_RANGE: u64 = 256 * 1024;
+
+pub fn begin_drop() -> bool {
+    !DROP_IN_PROGRESS.swap(true, Ordering::SeqCst)
+}
+
+pub fn end_drop() {
+    DROP_IN_PROGRESS.store(false, Ordering::SeqCst);
+}
+
+pub fn take_forget_last_text() -> bool {
+    FORGET_LAST_TEXT.swap(false, Ordering::SeqCst)
+}
+
+pub fn served() -> (u64, u64) {
+    (SERVED_REQUESTS.load(Ordering::SeqCst), SERVED_BYTES.load(Ordering::SeqCst))
+}
+
+pub fn clip_total_bytes() -> u64 {
+    CLIP_FILES.lock().unwrap().iter().filter(|f| !f.is_dir).map(|f| f.size).sum()
 }
 
 fn enumerate_files(paths: &[String]) -> Vec<ClipFileEntry> {
@@ -241,8 +268,11 @@ fn is_safe_clip_component(part: &str) -> bool {
 }
 
 pub fn check_clipboard_files_change() -> Option<message_proto::Message> {
+    if DROP_IN_PROGRESS.load(Ordering::SeqCst) {
+        return None;
+    }
     let paths = platform::get_clipboard_file_paths()?;
-    if paths.is_empty() {
+    if paths.is_empty() || paths.iter().all(|p| is_received_download(p)) {
         return None;
     }
 
@@ -260,7 +290,30 @@ pub fn check_clipboard_files_change() -> Option<message_proto::Message> {
     }
 
     *CLIP_FILES.lock().unwrap() = files;
+    Some(format_list_message())
+}
 
+fn is_received_download(path: &str) -> bool {
+    let temp = std::env::temp_dir().to_string_lossy().trim_end_matches('\\').to_lowercase();
+    path.to_lowercase()
+        .strip_prefix(&temp)
+        .map_or(false, |rest| rest.starts_with("\\hoptodesk_clip_"))
+}
+
+pub fn announce_dropped_files(paths: &[String]) -> Option<message_proto::Message> {
+    let files = enumerate_files(paths);
+    if files.is_empty() || !platform::set_clipboard_files(paths) {
+        return None;
+    }
+    *LAST_FILE_PATHS.lock().unwrap() = paths.to_vec();
+    *CLIP_FILES.lock().unwrap() = files;
+    SERVED_REQUESTS.store(0, Ordering::SeqCst);
+    SERVED_BYTES.store(0, Ordering::SeqCst);
+    FORGET_LAST_TEXT.store(true, Ordering::SeqCst);
+    Some(format_list_message())
+}
+
+fn format_list_message() -> message_proto::Message {
     let mut format_list = message_proto::CliprdrServerFormatList::new();
     let mut fmt1 = message_proto::CliprdrFormat::new();
     fmt1.id = FILEDESCRIPTOR_FORMAT_ID;
@@ -274,7 +327,7 @@ pub fn check_clipboard_files_change() -> Option<message_proto::Message> {
     cliprdr.union = Some(message_proto::cliprdr::Union::FormatList(format_list));
     let mut msg = message_proto::Message::new();
     msg.union = Some(message_proto::message::Union::Cliprdr(cliprdr));
-    Some(msg)
+    msg
 }
 
 pub fn handle_cliprdr_host(cliprdr: &message_proto::Cliprdr) -> Vec<message_proto::Message> {
@@ -305,9 +358,8 @@ pub fn handle_cliprdr_host(cliprdr: &message_proto::Cliprdr) -> Vec<message_prot
 
 pub fn handle_cliprdr_client(cliprdr: &message_proto::Cliprdr) -> Vec<message_proto::Message> {
     match &cliprdr.union {
-        Some(message_proto::cliprdr::Union::FormatList(fl)) => {
-
-            handle_incoming_format_list(fl)
+        Some(message_proto::cliprdr::Union::FormatList(_)) => {
+            vec![make_format_list_response(0x1)]
         }
         Some(message_proto::cliprdr::Union::FormatListResponse(_)) => {
             vec![]
@@ -329,6 +381,7 @@ pub fn handle_cliprdr_client(cliprdr: &message_proto::Cliprdr) -> Vec<message_pr
 }
 
 fn handle_format_data_request_host(requested_format_id: i32) -> Vec<message_proto::Message> {
+    SERVED_REQUESTS.fetch_add(1, Ordering::SeqCst);
     if requested_format_id == FILEDESCRIPTOR_FORMAT_ID {
         let files = CLIP_FILES.lock().unwrap();
         if files.is_empty() {
@@ -344,6 +397,7 @@ fn handle_format_data_request_host(requested_format_id: i32) -> Vec<message_prot
 fn handle_file_contents_request(
     req: &message_proto::CliprdrFileContentsRequest,
 ) -> Vec<message_proto::Message> {
+    SERVED_REQUESTS.fetch_add(1, Ordering::SeqCst);
     let files = CLIP_FILES.lock().unwrap();
     let index = req.list_index as usize;
     if index >= files.len() {
@@ -361,7 +415,9 @@ fn handle_file_contents_request(
     } else if req.dw_flags == FILECONTENTS_RANGE {
         let position =
             (req.n_position_high as u64) << 32 | (req.n_position_low as u64 & 0xFFFFFFFF);
-        let requested = (req.cb_requested as u32 as u64).min(file.size.saturating_sub(position));
+        let requested = (req.cb_requested as u32 as u64)
+            .min(file.size.saturating_sub(position))
+            .min(MAX_SERVED_RANGE);
 
         if file.is_dir {
             return vec![make_file_contents_response(0x1, req.stream_id, vec![])];
@@ -371,7 +427,13 @@ fn handle_file_contents_request(
         }
 
         match read_file_chunk(&file.path, position, requested as usize) {
-            Ok(data) => vec![make_file_contents_response(0x1, req.stream_id, data)],
+            Ok(data) if data.is_empty() && requested > 0 => {
+                vec![make_file_contents_response(0x2, req.stream_id, vec![])]
+            }
+            Ok(data) => {
+                SERVED_BYTES.fetch_add(data.len() as u64, Ordering::SeqCst);
+                vec![make_file_contents_response(0x1, req.stream_id, data)]
+            }
             Err(_) => vec![make_file_contents_response(0x2, req.stream_id, vec![])],
         }
     } else {
@@ -614,6 +676,7 @@ fn finalize_received_files(state: &RecvState) {
     }
 
     if !top_level_paths.is_empty() {
+        *LAST_FILE_PATHS.lock().unwrap() = top_level_paths.clone();
         platform::set_clipboard_files(&top_level_paths);
     }
 }

@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "hoptodesk"
-version = "1.46.55"
+version = "1.46.70"
 dependencies = [
  "bytes",
  "cc",

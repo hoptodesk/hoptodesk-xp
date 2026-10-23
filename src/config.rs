@@ -2,10 +2,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::io::Write;
+use winapi::shared::winerror::ERROR_SHARING_VIOLATION;
 
 const APP_NAME: &str = "HopToDesk";
 
 const CHARS: &[u8] = b"23456789abcdefghijkmnpqrstuvwxyz";
+
+const FILE_RETRIES: u32 = 20;
+const FILE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(10);
 
 pub struct Config {
     pub id: String,
@@ -17,6 +21,7 @@ pub struct Config {
 
     pub key_pair: (Vec<u8>, Vec<u8>),
     path: PathBuf,
+    read_failed: bool,
 }
 
 pub struct Config2 {
@@ -25,11 +30,13 @@ pub struct Config2 {
     pub serial: i32,
     pub options: HashMap<String, String>,
     path: PathBuf,
+    read_failed: bool,
 }
 
 pub struct PeerConfig {
     pub alias: String,
     pub options: HashMap<String, String>,
+    read_failed: bool,
 }
 
 #[derive(Clone)]
@@ -47,6 +54,7 @@ pub struct LocalConfig {
     pub recent_peers: Vec<RecentPeer>,
     pub options: HashMap<String, String>,
     path: PathBuf,
+    read_failed: bool,
 }
 
 fn shared_app_dir() -> Option<PathBuf> {
@@ -151,6 +159,40 @@ fn config_path(suffix: &str) -> PathBuf {
     config_dir().join(format!("{}{}.toml", APP_NAME, suffix))
 }
 
+fn read_config_file(path: &std::path::Path) -> Option<String> {
+    let mut retries = 0;
+    loop {
+        match std::fs::read(path) {
+            Ok(bytes) => return Some(String::from_utf8_lossy(&bytes).into_owned()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(String::new()),
+            Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32) && retries < FILE_RETRIES => {
+                retries += 1;
+                std::thread::sleep(FILE_RETRY_DELAY);
+            }
+            Err(e) => {
+                write_log(&format!("[config] Failed to read {}, it will not be saved: {}", path.display(), e));
+                return None;
+            }
+        }
+    }
+}
+
+fn write_config_file(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let mut retries = 0;
+    let mut file = loop {
+        match std::fs::OpenOptions::new().write(true).create(true).truncate(false).share_mode(0).open(path) {
+            Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32) && retries < FILE_RETRIES => {
+                retries += 1;
+                std::thread::sleep(FILE_RETRY_DELAY);
+            }
+            result => break result?,
+        }
+    };
+    file.write_all(content.as_bytes())?;
+    file.set_len(content.len() as u64)
+}
+
 impl Config {
     pub fn load() -> Self {
         let path = config_path("");
@@ -163,14 +205,23 @@ impl Config {
             encryption_key: String::new(),
             key_pair: (Vec::new(), Vec::new()),
             path,
+            read_failed: false,
         };
         cfg.read();
+
+        let mut retries = 0;
+        while cfg.id.is_empty() && !cfg.read_failed && retries < FILE_RETRIES && cfg.path.exists() {
+            retries += 1;
+            std::thread::sleep(FILE_RETRY_DELAY);
+            cfg.read();
+        }
 
         let mut generated = false;
         if cfg.id.is_empty() {
             if !cfg.import_legacy_identity() {
                 cfg.id = generate_id();
             }
+            write_log(&format!("[config] No ID in {}, new ID is {}", cfg.path.display(), cfg.id));
             generated = true;
         }
         if cfg.password.is_empty() {
@@ -198,7 +249,9 @@ impl Config {
     }
 
     fn read(&mut self) {
-        if let Ok(content) = std::fs::read_to_string(&self.path) {
+        let content = read_config_file(&self.path);
+        self.read_failed = content.is_none();
+        if let Some(content) = content {
             for line in content.lines() {
                 let line = line.trim();
                 if let Some((key, val)) = parse_toml_line(line) {
@@ -240,6 +293,7 @@ impl Config {
             encryption_key: String::new(),
             key_pair: (Vec::new(), Vec::new()),
             path: src.clone(),
+            read_failed: false,
         };
         old.read();
         let id_ok = old.id.len() >= 6
@@ -271,6 +325,9 @@ impl Config {
     }
 
     pub fn save(&self) {
+        if self.read_failed {
+            return;
+        }
         let mut content = format!(
             "id = {}\npassword = {}\nsalt = {}\nkey_confirmed = {}\nkey_pair_sk = {}\nkey_pair_pk = {}\n",
             toml_encode_str(&self.id),
@@ -289,7 +346,7 @@ impl Config {
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Err(e) = std::fs::write(&self.path, &content) {
+        if let Err(e) = write_config_file(&self.path, &content) {
             write_log(&format!("[config] Failed to save {}: {}", self.path.display(), e));
         }
     }
@@ -308,13 +365,16 @@ impl Config2 {
             serial: 0,
             options: HashMap::new(),
             path,
+            read_failed: false,
         };
         cfg.read();
         cfg
     }
 
     fn read(&mut self) {
-        if let Ok(content) = std::fs::read_to_string(&self.path) {
+        let content = read_config_file(&self.path);
+        self.read_failed = content.is_none();
+        if let Some(content) = content {
             let mut in_options = false;
             for line in content.lines() {
                 let line = line.trim();
@@ -343,6 +403,9 @@ impl Config2 {
     }
 
     pub fn save(&self) {
+        if self.read_failed {
+            return;
+        }
         let mut content = String::new();
         if !self.rendezvous_server.is_empty() {
             content.push_str(&format!("rendezvous_server = {}\n", toml_encode_str(&self.rendezvous_server)));
@@ -364,7 +427,7 @@ impl Config2 {
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Err(e) = std::fs::write(&self.path, &content) {
+        if let Err(e) = write_config_file(&self.path, &content) {
             write_log(&format!("[config2] Failed to save {}: {}", self.path.display(), e));
         }
     }
@@ -404,13 +467,16 @@ impl LocalConfig {
             recent_peers: Vec::new(),
             options: HashMap::new(),
             path,
+            read_failed: false,
         };
         cfg.read();
         cfg
     }
 
     fn read(&mut self) {
-        if let Ok(content) = std::fs::read_to_string(&self.path) {
+        let content = read_config_file(&self.path);
+        self.read_failed = content.is_none();
+        if let Some(content) = content {
             let mut in_options = false;
             let mut in_recent = false;
             for line in content.lines() {
@@ -471,6 +537,9 @@ impl LocalConfig {
     }
 
     pub fn save(&self) {
+        if self.read_failed {
+            return;
+        }
         let mut content = String::new();
         if !self.remote_id.is_empty() {
             content.push_str(&format!("remote_id = {}\n", toml_encode_str(&self.remote_id)));
@@ -514,7 +583,7 @@ impl LocalConfig {
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Err(e) = std::fs::write(&self.path, &content) {
+        if let Err(e) = write_config_file(&self.path, &content) {
             write_log(&format!("[local] Failed to save {}: {}", self.path.display(), e));
         }
     }
@@ -613,8 +682,11 @@ impl PeerConfig {
         let mut cfg = PeerConfig {
             alias: String::new(),
             options: HashMap::new(),
+            read_failed: false,
         };
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        let content = read_config_file(&path);
+        cfg.read_failed = content.is_none();
+        if let Some(content) = content {
             for line in content.lines() {
                 if let Some((key, val)) = parse_toml_line(line.trim()) {
                     match key {
@@ -632,6 +704,9 @@ impl PeerConfig {
     }
 
     pub fn save(&self, id: &str) {
+        if self.read_failed {
+            return;
+        }
         let dir = peers_dir();
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join(format!("{}.toml", id));
@@ -648,7 +723,7 @@ impl PeerConfig {
                 content.push_str(&format!("{} = {}\n", k, toml_encode_str(v)));
             }
         }
-        let _ = std::fs::write(&path, &content);
+        let _ = write_config_file(&path, &content);
     }
 
     pub fn get_option(&self, key: &str) -> String {
@@ -1004,7 +1079,14 @@ pub fn cleanup_old_logs() {
             .as_secs();
         now.saturating_sub(31 * 86400)
     };
-    for entry in entries.flatten() {
+    let entries: Vec<_> = entries.flatten().collect();
+    let subdir_entries: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter_map(|entry| std::fs::read_dir(entry.path()).ok())
+        .flat_map(|subdir| subdir.flatten())
+        .collect();
+    for entry in entries.into_iter().chain(subdir_entries) {
         let path = entry.path();
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             if name.starts_with("hoptodesk_r") && name.ends_with(".log") {

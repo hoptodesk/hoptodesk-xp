@@ -208,16 +208,16 @@ fn log_truncate(msg: &str) -> &str {
 pub fn run_signal_loop(
     my_id: String,
     password: String,
-    pk: Vec<u8>,
+    key_pair: (Vec<u8>, Vec<u8>),
     signal_state: Arc<Mutex<SignalState>>,
 ) {
-    run_signal_loop_ex(my_id, password, pk, signal_state, false)
+    run_signal_loop_ex(my_id, password, key_pair, signal_state, false)
 }
 
 pub fn run_signal_loop_ex(
     my_id: String,
     password: String,
-    pk: Vec<u8>,
+    key_pair: (Vec<u8>, Vec<u8>),
     signal_state: Arc<Mutex<SignalState>>,
     yield_to_service: bool,
 ) {
@@ -244,7 +244,7 @@ pub fn run_signal_loop_ex(
             crate::cm::write_service_status("connecting");
         }
 
-        match run_signal_once(&my_id, &password, &pk, &signal_state, yield_to_service) {
+        match run_signal_once(&my_id, &password, &key_pair, &signal_state, yield_to_service) {
             Ok(()) => {
 
             }
@@ -271,7 +271,7 @@ pub fn run_signal_loop_ex(
 fn run_signal_once(
     my_id: &str,
     password: &str,
-    pk: &[u8],
+    key_pair: &(Vec<u8>, Vec<u8>),
     signal_state: &Arc<Mutex<SignalState>>,
     yield_to_service: bool,
 ) -> Result<(), String> {
@@ -335,7 +335,7 @@ fn run_signal_once(
                         &msg,
                         my_id,
                         password,
-                        pk,
+                        key_pair,
                         &mut ws,
                         &host,
                         port,
@@ -383,7 +383,7 @@ fn handle_signal_message(
     raw_msg: &str,
     my_id: &str,
     password: &str,
-    pk: &[u8],
+    key_pair: &(Vec<u8>, Vec<u8>),
     ws: &mut WsClient,
     ws_host: &str,
     ws_port: u16,
@@ -396,7 +396,7 @@ fn handle_signal_message(
                 "[signal] ConnectRequest from {}",
                 sm.sender_id
             ));
-            handle_connect_request(sm, my_id, password, pk, ws, ws_host, ws_port, signal_state);
+            handle_connect_request(sm, my_id, password, key_pair, ws, ws_host, ws_port, signal_state);
         } else if !sm.addr.is_empty() && !sm.sender_id.is_empty() && sm.data == "closesessions" {
 
             crate::config::write_log(&format!("[signal] CloseSessions from {}", sm.sender_id));
@@ -412,7 +412,7 @@ fn handle_signal_message(
         } else if !sm.addr.is_empty() && sm.sender_id.is_empty() && sm.pk.is_empty() {
 
             crate::config::write_log(&format!("[signal] RelayConnection: addr={} from {}", crate::config::mask_ip(&sm.addr), sm.endpoint));
-            handle_relay_connection(&sm.addr, my_id, password, pk, &sm.endpoint, ws, ws_host, ws_port);
+            handle_relay_connection(&sm.addr, my_id, password, key_pair, &sm.endpoint, ws, ws_host, ws_port);
         } else if sm.addr.is_empty() && sm.pk.is_empty() && sm.sender_id.is_empty() {
             crate::config::write_log(&format!("[signal] Other message from {}: protocol={}", sm.endpoint, sm.protocol));
         }
@@ -423,7 +423,7 @@ fn handle_connect_request(
     cr: &SignalMessage,
     my_id: &str,
     password: &str,
-    pk: &[u8],
+    key_pair: &(Vec<u8>, Vec<u8>),
     ws: &mut WsClient,
     _ws_host: &str,
     _ws_port: u16,
@@ -475,7 +475,7 @@ fn handle_connect_request(
     crate::config::write_log(&format!("[signal] Public addr: {}, LAN addr: {} (get_public_ip took {}ms)",
         crate::config::mask_ip(&public_addr), crate::config::mask_ip(&lan_addr), t1.elapsed().as_millis()));
 
-    let pk_b64 = crate::config::base64_encode(pk);
+    let pk_b64 = crate::config::base64_encode(&key_pair.1);
     let listening = serde_json::json!({
         "protocol": "one-to-one",
         "endpoint": sender_id,
@@ -497,12 +497,12 @@ fn handle_connect_request(
 
     let my_id = my_id.to_string();
     let password = password.to_string();
-    let pk = pk.to_vec();
+    let key_pair = key_pair.clone();
     let signal_state = signal_state.clone();
 
     std::thread::spawn(move || {
         let stop = Arc::new(AtomicBool::new(false));
-        server::accept_connection(listener, &my_id, &password, &pk, stop);
+        server::accept_connection(listener, &my_id, &password, &key_pair, stop);
 
         if let Ok(mut state) = signal_state.lock() {
             state.incoming_session = None;
@@ -514,7 +514,7 @@ fn handle_relay_connection(
     relay_addr: &str,
     my_id: &str,
     password: &str,
-    pk: &[u8],
+    key_pair: &(Vec<u8>, Vec<u8>),
     peer_id: &str,
     ws: &mut WsClient,
     _ws_host: &str,
@@ -573,7 +573,7 @@ fn handle_relay_connection(
 
     let my_id = my_id.to_string();
     let password = password.to_string();
-    let pk = pk.to_vec();
+    let key_pair = key_pair.clone();
 
     std::thread::spawn(move || {
         let mut stream = network::FramedStream::from_tcp(tcp_stream);
@@ -581,7 +581,7 @@ fn handle_relay_connection(
         stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
 
         let stop = Arc::new(AtomicBool::new(false));
-        if let Err(e) = server::run_session_public(&mut stream, &my_id, &password, &pk, None, &stop) {
+        if let Err(e) = server::run_session_public(&mut stream, &my_id, &password, &key_pair, None, &stop) {
             crate::config::write_log(&format!("[relay] Session error: {}", e));
         }
         crate::config::write_log(&format!("[relay] Session ended"));

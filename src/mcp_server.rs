@@ -475,8 +475,11 @@ fn tool_run_command(args: &Value) -> Value {
     if command.is_empty() {
         return tool_error("Command is required");
     }
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
     match std::process::Command::new("cmd")
         .args(["/C", command])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
     {
         Ok(output) => {

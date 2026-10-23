@@ -221,6 +221,10 @@ pub struct ClientState {
     pub tcp_connected: bool,
 
     pub link_dashboard_result: Option<(bool, String)>,
+
+    pub keyboard_enabled: bool,
+    pub file_enabled: bool,
+    pub clipboard_enabled: bool,
 }
 
 pub struct DisplayMeta {
@@ -252,6 +256,9 @@ impl Default for ClientState {
             recorder: None,
             tcp_connected: false,
             link_dashboard_result: None,
+            keyboard_enabled: true,
+            file_enabled: true,
+            clipboard_enabled: true,
         }
     }
 }
@@ -312,7 +319,7 @@ pub fn connect_to_peer_ft(
 pub fn connect_direct_stream(addrs: &[String]) -> Option<FramedStream> {
     for addr in addrs {
         crate::config::write_log(&format!("[client] Trying direct TCP to {}...", crate::config::mask_ip(addr)));
-        match FramedStream::connect(addr, Duration::from_millis(2500)) {
+        match FramedStream::connect(addr, Duration::from_millis(2500)).and_then(wait_for_first_message) {
             Ok(stream) => {
                 crate::config::write_log(&format!("[client] Connected to {}", crate::config::mask_ip(addr)));
                 return Some(stream);
@@ -323,6 +330,20 @@ pub fn connect_direct_stream(addrs: &[String]) -> Option<FramedStream> {
         }
     }
     None
+}
+
+fn wait_for_first_message(stream: FramedStream) -> io::Result<FramedStream> {
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let peeked = stream.tcp_stream().peek(&mut [0u8; 1]);
+    stream.set_read_timeout(None)?;
+    match peeked {
+        Ok(0) => Err(io::Error::new(io::ErrorKind::ConnectionAborted, "peer closed before its first message")),
+        Ok(_) => Ok(stream),
+        Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "no first message from peer"))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 pub fn run_client_on_stream(
@@ -652,6 +673,7 @@ fn run_client_inner(
         decoding.ability_vp8 = 1;
         decoding.prefer = message_proto::supported_decoding::PreferCodec::VP8.into();
         option.supported_decoding = protobuf::MessageField::some(decoding);
+        option.enable_file_transfer = message_proto::option_message::BoolOption::Yes.into();
         lr.option = protobuf::MessageField::some(option);
 
         let mut resp = message_proto::SwitchSidesResponse::new();
@@ -684,6 +706,7 @@ fn run_client_inner(
         decoding.ability_vp8 = 1;
         decoding.prefer = message_proto::supported_decoding::PreferCodec::VP8.into();
         option.supported_decoding = protobuf::MessageField::some(decoding);
+        option.enable_file_transfer = message_proto::option_message::BoolOption::Yes.into();
         lr.option = protobuf::MessageField::some(option);
 
         if file_transfer {
@@ -730,6 +753,7 @@ fn run_client_inner(
                 if let Some(message_proto::misc::Union::CloseReason(reason)) = &misc.union {
                     return Err(io::Error::new(io::ErrorKind::ConnectionRefused, reason.clone()));
                 }
+                apply_permission_info(&misc, client_state);
                 continue;
             }
             _ => {
@@ -804,6 +828,7 @@ fn run_client_inner(
                             }
                             return Ok(());
                         }
+                        apply_permission_info(&misc, client_state);
                         continue;
                     }
                     Some(message_proto::message::Union::TestDelay(td)) => {
@@ -939,7 +964,11 @@ fn run_client_inner(
         if last_clipboard_check.elapsed() >= Duration::from_millis(500) {
             last_clipboard_check = Instant::now();
 
+            if crate::clipboard_file::take_forget_last_text() {
+                last_clipboard_text.clear();
+            }
             if let Some(msg) = crate::clipboard_file::check_clipboard_files_change() {
+                last_clipboard_text.clear();
                 if let Ok(mut s) = stream.lock() {
                     if let Ok(bytes) = msg.write_to_bytes() {
                         let _ = s.send_msg(&bytes);
@@ -1140,6 +1169,21 @@ fn handle_video_frame(
     }
 }
 
+fn apply_permission_info(misc: &message_proto::Misc, client_state: &Arc<Mutex<ClientState>>) {
+    let Some(message_proto::misc::Union::PermissionInfo(pi)) = &misc.union else {
+        return;
+    };
+    let Ok(mut state) = client_state.lock() else {
+        return;
+    };
+    match pi.permission.enum_value() {
+        Ok(message_proto::permission_info::Permission::Keyboard) => state.keyboard_enabled = pi.enabled,
+        Ok(message_proto::permission_info::Permission::File) => state.file_enabled = pi.enabled,
+        Ok(message_proto::permission_info::Permission::Clipboard) => state.clipboard_enabled = pi.enabled,
+        _ => {}
+    }
+}
+
 fn handle_misc_from_server(misc: &message_proto::Misc, client_state: &Arc<Mutex<ClientState>>) -> bool {
     match &misc.union {
         Some(message_proto::misc::Union::SwitchDisplay(sd)) => {
@@ -1160,6 +1204,9 @@ fn handle_misc_from_server(misc: &message_proto::Misc, client_state: &Arc<Mutex<
                     q.push_back(("Peer".to_string(), cm.text.clone()));
                 }
             }
+        }
+        Some(message_proto::misc::Union::PermissionInfo(_)) => {
+            apply_permission_info(misc, client_state);
         }
         Some(message_proto::misc::Union::LinkDashboardResponse(resp)) => {
             crate::config::write_log(&format!(
@@ -1361,6 +1408,39 @@ pub fn send_ctrl_alt_del(client_state: &Arc<Mutex<ClientState>>) {
             }
         }
         Err(e) => crate::config::write_log(&format!("[client] send_ctrl_alt_del: serialize error: {}", e)),
+    }
+}
+
+pub fn send_message(client_state: &Arc<Mutex<ClientState>>, msg: &message_proto::Message) -> bool {
+    let stream = {
+        let s = match client_state.lock() {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        match &s.input_stream {
+            Some(st) => st.clone(),
+            None => return false,
+        }
+    };
+    let Ok(bytes) = msg.write_to_bytes() else {
+        return false;
+    };
+    let sent = match stream.lock() {
+        Ok(mut s) => s.send_msg(&bytes).is_ok(),
+        Err(_) => false,
+    };
+    sent
+}
+
+pub fn send_paste(client_state: &Arc<Mutex<ClientState>>) {
+    for (scancode, down) in [(0x1D, true), (0x2F, true), (0x2F, false), (0x1D, false)] {
+        let mut ke = message_proto::KeyEvent::new();
+        ke.mode = message_proto::KeyboardMode::Map.into();
+        ke.down = down;
+        ke.union = Some(message_proto::key_event::Union::Chr(scancode));
+        let mut msg = message_proto::Message::new();
+        msg.set_key_event(ke);
+        send_message(client_state, &msg);
     }
 }
 

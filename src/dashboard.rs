@@ -433,7 +433,7 @@ fn handle_incoming_message(text: &str) -> Result<Option<(String, serde_json::Val
                         }
                     }
                     _ => {
-                        config::write_log(&format!("[dashboard] Unknown event '{}': {}", event, json_str));
+                        config::write_log(&format!("[dashboard] Unknown event '{}'", event));
                     }
                 }
             }

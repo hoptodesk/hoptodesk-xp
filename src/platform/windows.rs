@@ -533,7 +533,7 @@ pub fn set_clipboard_files(paths: &[String]) -> bool {
     use winapi::um::winuser::{
         CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
     };
-    use winapi::um::winbase::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT};
+    use winapi::um::winbase::{GlobalAlloc, GlobalFree, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT};
 
     const CF_HDROP: UINT = 15;
 
@@ -553,7 +553,15 @@ pub fn set_clipboard_files(paths: &[String]) -> bool {
     let total_size = header_size + wide_data.len() * 2;
 
     unsafe {
-        if OpenClipboard(std::ptr::null_mut()) == FALSE {
+        let mut opened = false;
+        for _ in 0..10 {
+            if OpenClipboard(std::ptr::null_mut()) != FALSE {
+                opened = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        if !opened {
             return false;
         }
         EmptyClipboard();
@@ -578,7 +586,11 @@ pub fn set_clipboard_files(paths: &[String]) -> bool {
         std::ptr::copy_nonoverlapping(wide_data.as_ptr(), dest, wide_data.len());
 
         GlobalUnlock(hmem);
-        SetClipboardData(CF_HDROP, hmem);
+        if SetClipboardData(CF_HDROP, hmem).is_null() {
+            GlobalFree(hmem);
+            CloseClipboard();
+            return false;
+        }
         CloseClipboard();
         true
     }

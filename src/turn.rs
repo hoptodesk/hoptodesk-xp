@@ -4,7 +4,10 @@ use crate::websocket::WsClient;
 use crate::wininet;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::config::mask_ip;
 
@@ -145,8 +148,10 @@ const ATTR_XOR_RELAYED_ADDR: u16 = 0x0016;
 const ATTR_REQ_TRANSPORT: u16 = 0x0019;
 const ATTR_XOR_MAPPED_ADDR: u16 = 0x0020;
 const ATTR_CONNECTION_ID: u16 = 0x002A;
+const ATTR_LIFETIME: u16 = 0x000D;
 
 const METHOD_ALLOCATE: u16 = 0x003;
+const METHOD_REFRESH: u16 = 0x004;
 const METHOD_CREATE_PERM: u16 = 0x008;
 const METHOD_CONN_BIND: u16 = 0x00B;
 const METHOD_CONN_ATTEMPT: u16 = 0x00C;
@@ -412,11 +417,18 @@ fn resolve_addr(addr: &str) -> io::Result<SocketAddr> {
     })
 }
 
+fn allocation_lifetime(resp: &ParsedStun) -> u32 {
+    resp.get_attr(ATTR_LIFETIME)
+        .filter(|v| v.len() == 4)
+        .map(|v| u32::from_be_bytes([v[0], v[1], v[2], v[3]]))
+        .unwrap_or(600)
+}
+
 fn turn_allocate(
     stream: &mut TcpStream,
     username: &str,
     password: &str,
-) -> Result<(SocketAddr, String, String), String> {
+) -> Result<(SocketAddr, String, String, u32), String> {
 
     let mut req = StunBuilder::new(METHOD_ALLOCATE, CLASS_REQUEST);
     req.add_transport_tcp();
@@ -429,7 +441,7 @@ fn turn_allocate(
             .ok_or("No relay addr in success")?;
         let realm = resp.get_str(ATTR_REALM).unwrap_or_default();
         let nonce = resp.get_str(ATTR_NONCE).unwrap_or_default();
-        return Ok((relay, realm, nonce));
+        return Ok((relay, realm, nonce, allocation_lifetime(&resp)));
     }
 
     if resp.class() != CLASS_ERROR {
@@ -459,7 +471,113 @@ fn turn_allocate(
 
     let relay = resp2.get_xor_addr(ATTR_XOR_RELAYED_ADDR)
         .ok_or("No XOR-RELAYED-ADDRESS")?;
-    Ok((relay, realm, nonce))
+    Ok((relay, realm, nonce, allocation_lifetime(&resp2)))
+}
+
+enum RefreshError {
+    StaleNonce(String),
+    Failed(String),
+}
+
+fn turn_refresh(
+    stream: &mut TcpStream,
+    lifetime: u32,
+    username: &str, password: &str, realm: &str, nonce: &str,
+) -> Result<(), RefreshError> {
+    let key = stun_key(username, realm, password);
+    let mut req = StunBuilder::new(METHOD_REFRESH, CLASS_REQUEST);
+    req.add_attr(ATTR_LIFETIME, &lifetime.to_be_bytes());
+    req.add_username(username);
+    req.add_realm(realm);
+    req.add_nonce(nonce);
+    send_stun(stream, &req.build(Some(&key))).map_err(|e| RefreshError::Failed(format!("send: {}", e)))?;
+
+    loop {
+        let resp = recv_stun(stream).map_err(|e| RefreshError::Failed(format!("recv: {}", e)))?;
+        if resp.method() != METHOD_REFRESH {
+            continue;
+        }
+        if resp.class() == CLASS_SUCCESS {
+            return Ok(());
+        }
+        let (code, reason) = resp.get_error().unwrap_or((0, "unknown".into()));
+        if code == 438 {
+            if let Some(fresh) = resp.get_str(ATTR_NONCE) {
+                return Err(RefreshError::StaleNonce(fresh));
+            }
+        }
+        return Err(RefreshError::Failed(format!("Refresh error {}: {}", code, reason)));
+    }
+}
+
+pub struct RelayAllocation {
+    ctrl: TcpStream,
+    stop: Arc<AtomicBool>,
+}
+
+impl RelayAllocation {
+    fn start(ctrl: TcpStream, lifetime: u32, username: &str, password: &str, realm: &str, nonce: &str) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        match ctrl.try_clone() {
+            Ok(refresh_conn) => {
+                let stop2 = stop.clone();
+                let (username, password, realm, nonce) =
+                    (username.to_string(), password.to_string(), realm.to_string(), nonce.to_string());
+                thread::spawn(move || {
+                    keep_allocation(refresh_conn, stop2, lifetime, username, password, realm, nonce)
+                });
+            }
+            Err(e) => crate::config::write_log(&format!("[turn] Relay allocation will not be refreshed: {}", e)),
+        }
+        Self { ctrl, stop }
+    }
+}
+
+impl Drop for RelayAllocation {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = self.ctrl.shutdown(std::net::Shutdown::Both);
+        crate::config::write_log("[turn] Relay allocation released");
+    }
+}
+
+fn keep_allocation(
+    mut ctrl: TcpStream,
+    stop: Arc<AtomicBool>,
+    lifetime: u32,
+    username: String, password: String, realm: String, mut nonce: String,
+) {
+    let interval = Duration::from_secs(u64::from((lifetime / 2).max(30)));
+    let retry = Duration::from_secs(30);
+    let mut due = Instant::now() + interval;
+    while !stop.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_secs(1));
+        if Instant::now() < due {
+            continue;
+        }
+        let mut result = turn_refresh(&mut ctrl, lifetime, &username, &password, &realm, &nonce);
+        if let Err(RefreshError::StaleNonce(fresh)) = result {
+            nonce = fresh;
+            result = turn_refresh(&mut ctrl, lifetime, &username, &password, &realm, &nonce);
+        }
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        due = Instant::now() + match result {
+            Ok(()) => {
+                crate::config::write_log(&format!("[turn] Relay allocation refreshed for {} s", lifetime));
+                interval
+            }
+            Err(RefreshError::StaleNonce(_)) => {
+                crate::config::write_log("[turn] Relay refresh failed: stale nonce");
+                retry
+            }
+            Err(RefreshError::Failed(e)) => {
+                crate::config::write_log(&format!("[turn] Relay refresh failed: {}", e));
+                retry
+            }
+        };
+    }
 }
 
 fn turn_create_permission(
@@ -549,7 +667,7 @@ fn try_turn_server(
     ctrl.set_nodelay(true).ok();
     ctrl.set_read_timeout(Some(Duration::from_secs(10))).ok();
 
-    let (relay_addr, realm, nonce) = turn_allocate(
+    let (relay_addr, realm, nonce, lifetime) = turn_allocate(
         &mut ctrl, &server.username, &server.password,
     )?;
     crate::config::write_log(&format!("[turn] Allocated relay: {}", mask_ip(&relay_addr)));
@@ -594,7 +712,8 @@ fn try_turn_server(
     ws.send_text(&ready_msg.to_string()).ok();
     crate::config::write_log(&format!("[turn] Sent RelayReady"));
 
-    Ok(FramedStream::from_tcp(data_conn))
+    let allocation = RelayAllocation::start(ctrl, lifetime, &server.username, &server.password, &realm, &nonce);
+    Ok(FramedStream::from_tcp(data_conn).with_relay(allocation))
 }
 
 pub fn connect_via_turn(

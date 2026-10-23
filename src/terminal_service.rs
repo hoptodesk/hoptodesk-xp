@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const CHANNEL_BUFFER_SIZE: usize = 256;
 const READ_BUF_SIZE: usize = 4096;
@@ -230,11 +230,33 @@ fn send_ctrl_c(pid: u32) {
     unsafe {
         FreeConsole();
         if AttachConsole(pid) != 0 {
-            SetConsoleCtrlHandler(None, 1);
-            GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
-            SetConsoleCtrlHandler(None, 0);
+            HOST_CTRL_HANDLER_ONCE.call_once(|| {
+                SetConsoleCtrlHandler(Some(host_console_ctrl_handler), 1);
+            });
+            HOST_CTRL_EVENT_HANDLED.store(false, Ordering::SeqCst);
+            if GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) != 0 {
+                let deadline = Instant::now() + HOST_CTRL_HANDLER_WAIT;
+                while !HOST_CTRL_EVENT_HANDLED.load(Ordering::SeqCst) && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(2));
+                }
+            }
             FreeConsole();
         }
+    }
+}
+
+const HOST_CTRL_HANDLER_WAIT: Duration = Duration::from_secs(2);
+static HOST_CTRL_HANDLER_ONCE: std::sync::Once = std::sync::Once::new();
+static HOST_CTRL_EVENT_HANDLED: AtomicBool = AtomicBool::new(false);
+
+unsafe extern "system" fn host_console_ctrl_handler(ctrl_type: u32) -> i32 {
+    const CTRL_C_EVENT: u32 = 0;
+    const CTRL_BREAK_EVENT: u32 = 1;
+    if ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT {
+        HOST_CTRL_EVENT_HANDLED.store(true, Ordering::SeqCst);
+        1
+    } else {
+        0
     }
 }
 

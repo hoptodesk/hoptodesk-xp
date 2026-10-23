@@ -26,7 +26,10 @@ pub fn encode_frame(data: &[u8], buf: &mut Vec<u8>) {
     buf.extend_from_slice(data);
 }
 
-pub fn read_frame(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
+pub const PRE_LOGIN_MAX_FRAME_LEN: usize = 4 * 1024 * 1024;
+
+pub fn read_frame(stream: &mut TcpStream, max_len: usize) -> io::Result<Vec<u8>> {
     let mut first = [0u8; 1];
     stream.read_exact(&mut first)?;
 
@@ -50,7 +53,7 @@ pub fn read_frame(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
     }
     n >>= 2;
 
-    if n > 16 * 1024 * 1024 {
+    if n > max_len {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "Frame too large"));
     }
 
@@ -89,11 +92,18 @@ impl Encrypt {
 pub struct FramedStream {
     stream: TcpStream,
     encrypt: Option<Encrypt>,
+    max_frame_len: usize,
+    relay: Option<crate::turn::RelayAllocation>,
 }
 
 impl FramedStream {
     pub fn from_tcp(stream: TcpStream) -> Self {
-        Self { stream, encrypt: None }
+        Self { stream, encrypt: None, max_frame_len: MAX_FRAME_LEN, relay: None }
+    }
+
+    pub fn with_relay(mut self, relay: crate::turn::RelayAllocation) -> Self {
+        self.relay = Some(relay);
+        self
     }
 
     pub fn connect(addr: &str, timeout: Duration) -> io::Result<Self> {
@@ -109,11 +119,15 @@ impl FramedStream {
             TcpStream::connect(addr)?
         };
         stream.set_nodelay(true).ok();
-        Ok(Self { stream, encrypt: None })
+        Ok(Self { stream, encrypt: None, max_frame_len: MAX_FRAME_LEN, relay: None })
     }
 
     pub fn set_key(&mut self, key: [u8; 32]) {
         self.encrypt = Some(Encrypt::new(key));
+    }
+
+    pub fn set_max_frame_len(&mut self, max_len: usize) {
+        self.max_frame_len = max_len;
     }
 
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
@@ -145,7 +159,7 @@ impl FramedStream {
     }
 
     pub fn recv_msg(&mut self) -> io::Result<Vec<u8>> {
-        let raw = read_frame(&mut self.stream)?;
+        let raw = read_frame(&mut self.stream, self.max_frame_len)?;
         if let Some(ref mut enc) = self.encrypt {
             enc.dec(&raw)
         } else {
@@ -165,6 +179,8 @@ impl FramedStream {
                 send_seq: e.send_seq,
                 recv_seq: e.recv_seq,
             }),
+            max_frame_len: self.max_frame_len,
+            relay: None,
         })
     }
 }

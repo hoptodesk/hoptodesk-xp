@@ -5999,9 +5999,19 @@ pub struct ColumnDrag {
 const COLUMN_GRIP: f32 = 4.0;
 const COLUMN_MIN_W: f32 = 16.0;
 
-// The `table.folder-view` under a point (an OS file drop target). Walks up from
-// the hit-tested element to the nearest folder-view table.
-pub fn folder_view_at(engine: &EngineRef, x: f32, y: f32) -> Option<NodeKey> {
+fn is_file_drop_target(n: &super::dom::Node) -> bool {
+    (n.tag == "table" && n.has_class("folder-view")) || n.attr("filedrop").is_some()
+}
+
+pub fn has_file_drop_target(engine: &EngineRef) -> bool {
+    let e = engine.borrow();
+    e.doc
+        .descendants(e.doc.root)
+        .into_iter()
+        .any(|k| e.doc.arena.get(k).map_or(false, is_file_drop_target))
+}
+
+pub fn file_drop_target_at(engine: &EngineRef, x: f32, y: f32) -> Option<NodeKey> {
     let e = engine.borrow();
     let hit = crate::engine::window::hit_test_ordered(
         &e.doc,
@@ -6013,7 +6023,7 @@ pub fn folder_view_at(engine: &EngineRef, x: f32, y: f32) -> Option<NodeKey> {
     let mut cur = Some(hit);
     while let Some(k) = cur {
         let n = e.doc.arena.get(k)?;
-        if n.tag == "table" && n.has_class("folder-view") {
+        if is_file_drop_target(n) {
             return Some(k);
         }
         cur = n.parent;
@@ -6021,14 +6031,13 @@ pub fn folder_view_at(engine: &EngineRef, x: f32, y: f32) -> Option<NodeKey> {
     None
 }
 
-// Deliver an OS file-drag event (dragenter/dragleave/drop) to a folder-view
-// table with Sciter's evt shape: draggingDataType == #file, dragging = the file
-// paths. file_transfer.tis's drop handler uploads them to the remote pane.
 pub fn dispatch_os_file_drag(
     interp: &mut Interp,
     engine: &EngineRef,
     event_name: &str,
     target: NodeKey,
+    x: f32,
+    y: f32,
     paths: &[std::path::PathBuf],
 ) -> bool {
     let dragging = sv_array(
@@ -6037,9 +6046,17 @@ pub fn dispatch_os_file_drag(
             .map(|p| SV::Str(p.to_string_lossy().into_owned().into()))
             .collect(),
     );
+    let (rx, ry) = engine
+        .borrow()
+        .screen_rects
+        .get(&target)
+        .map(|&(rx, ry, _, _)| (rx, ry))
+        .unwrap_or((0.0, 0.0));
     let extra = [
         ("draggingDataType".to_string(), SV::Symbol("file".into())),
         ("dragging".to_string(), dragging),
+        ("x".to_string(), SV::Int((x - rx) as i64)),
+        ("y".to_string(), SV::Int((y - ry) as i64)),
     ];
     dispatch_dom_event_with(interp, engine, event_name, target, &extra).unwrap_or(false)
 }
