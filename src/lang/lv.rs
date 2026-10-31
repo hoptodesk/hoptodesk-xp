@@ -922,5 +922,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("A secure connection could not be established. Continue anyway?", "Neizdevās izveidot drošu savienojumu. Vai tomēr turpināt?"),
         ("Connection not secure", "Savienojums nav drošs"),
         ("Ticket submitted but attachment upload failed: ", "Pieteikums nosūtīts, bet pielikuma augšupielāde neizdevās: "),
+        ("You cannot connect to your own computer", "Jūs nevarat izveidot savienojumu ar savu datoru"),
+        ("Verification timed out. Please try again.", "Verifikācijas laiks beidzās. Lūdzu, mēģiniet vēlreiz."),
+        ("Failed to generate 2FA secret. Please try again.", "Neizdevās izveidot 2FA atslēgu. Lūdzu, mēģiniet vēlreiz."),
     ].iter().cloned().collect();
 }

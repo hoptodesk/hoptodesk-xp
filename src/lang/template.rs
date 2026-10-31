@@ -903,5 +903,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Your local IP address - share this for direct LAN connections", ""),
         ("{} is inviting this computer to join their dashboard.", ""),
         ("Copy failed", ""),
+        ("You cannot connect to your own computer", ""),
+        ("Verification timed out. Please try again.", ""),
+        ("Failed to generate 2FA secret. Please try again.", ""),
     ].iter().cloned().collect();
 }

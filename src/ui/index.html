@@ -1172,10 +1172,6 @@ self.ready = function() {
                         <span class="setting-name" data-tr="Remote Terminal">Remote Terminal</span>
                         <div class="toggle-switch" id="sw-terminal"><div class="toggle-knob"></div></div>
                     </div>
-                    <div class="setting-row" id="toggle-remote-printing">
-                        <span class="setting-name" data-tr="Remote Printing">Remote Printing</span>
-                        <div class="toggle-switch" id="sw-remote-printing"><div class="toggle-knob"></div></div>
-                    </div>
                     <div class="setting-row" id="toggle-wol">
                         <span class="setting-name" data-tr="Wake On LAN">Wake On LAN</span>
                         <div class="toggle-switch" id="sw-wol"><div class="toggle-knob"></div></div>
@@ -1194,10 +1190,6 @@ self.ready = function() {
                     <div class="setting-row" id="toggle-direct-server">
                         <span class="setting-name" data-tr="Direct IP Access">Direct IP Access</span>
                         <div class="toggle-switch" id="sw-direct-server"><div class="toggle-knob"></div></div>
-                    </div>
-                    <div class="setting-row" id="toggle-lan-discovery">
-                        <span class="setting-name" data-tr="LAN Discovery">LAN Discovery</span>
-                        <div class="toggle-switch" id="sw-lan-discovery"><div class="toggle-knob"></div></div>
                     </div>
                 </div>
                 <div class="settings-section">
@@ -1533,10 +1525,8 @@ self.ready = function() {
             updateToggle($(#sw-file), isDefaultOn(opts, "enable-file-transfer"));
             updateToggle($(#sw-remote-restart), isDefaultOn(opts, "enable-remote-restart"));
             updateToggle($(#sw-tunnel), isDefaultOn(opts, "enable-tunnel"));
-            updateToggle($(#sw-lan-discovery), isDefaultOn(opts, "enable-lan-discovery"));
             updateToggle($(#sw-terminal), isDefaultOn(opts, "enable-terminal"));
             // Default-OFF toggles
-            updateToggle($(#sw-remote-printing), isDefaultOff(opts, "enable-remote-printing"));
             updateToggle($(#sw-wol), isDefaultOff(opts, "enable-wol"));
             updateToggle($(#sw-direct-server), isDefaultOff(opts, "direct-server"));
             // Inverted: Allow Incoming = ON when stop-service is NOT "Y"
@@ -1561,9 +1551,7 @@ self.ready = function() {
             updateToggle($(#sw-file), isDefaultOn(opts, "enable-file-transfer"));
             updateToggle($(#sw-remote-restart), isDefaultOn(opts, "enable-remote-restart"));
             updateToggle($(#sw-tunnel), isDefaultOn(opts, "enable-tunnel"));
-            updateToggle($(#sw-lan-discovery), isDefaultOn(opts, "enable-lan-discovery"));
             updateToggle($(#sw-terminal), isDefaultOn(opts, "enable-terminal"));
-            updateToggle($(#sw-remote-printing), isDefaultOff(opts, "enable-remote-printing"));
             updateToggle($(#sw-wol), isDefaultOff(opts, "enable-wol"));
             updateToggle($(#sw-direct-server), isDefaultOff(opts, "direct-server"));
             updateToggle($(#sw-stop-service), opts["stop-service"] !== "Y");
@@ -1748,7 +1736,6 @@ self.ready = function() {
         makeDefaultOnToggle("#toggle-file", "#sw-file", "enable-file-transfer");
         makeDefaultOnToggle("#toggle-remote-restart", "#sw-remote-restart", "enable-remote-restart");
         makeDefaultOnToggle("#toggle-tunnel", "#sw-tunnel", "enable-tunnel");
-        makeDefaultOnToggle("#toggle-lan-discovery", "#sw-lan-discovery", "enable-lan-discovery");
         makeDefaultOnToggle("#toggle-terminal", "#sw-terminal", "enable-terminal");
 
         // --- Toggle handlers (default-OFF options: Y/N) ---
@@ -1766,7 +1753,6 @@ self.ready = function() {
             } catch(e) { dbg("FAIL: toggle " + rowId + ": " + e); }
         }
 
-        makeDefaultOffToggle("#toggle-remote-printing", "#sw-remote-printing", "enable-remote-printing");
         makeDefaultOffToggle("#toggle-direct-server", "#sw-direct-server", "direct-server");
 
         // WOL toggle with instructions popup
@@ -2046,7 +2032,6 @@ self.ready = function() {
                     return;
                 }
                 $(#set-invite-code-flag).text = code;
-                setOptionAndUpdate("dashboard_user_id", "pending...");
                 updateDashboardDisplay("pending...");
                 $(#dashboard-overlay).style#display = "none";
             };

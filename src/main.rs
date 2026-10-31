@@ -741,12 +741,15 @@ fn build_ui_translations() -> String {
         "Remote Control", "Partner ID", "Enter Remote ID", "Connect",
         "Transfer File", "Recent Sessions", "Favorites", "Settings",
         "Remote Access", "Keyboard/Mouse", "Clipboard", "File Transfer",
-        "Remote Restart", "TCP Tunneling", "Remote Printing", "Wake On LAN",
-        "Network", "Choose Network", "Proxy Settings", "Direct IP Access", "LAN Discovery",
+        "Remote Restart", "TCP Tunneling", "Wake On LAN",
+        "Network", "Choose Network", "Proxy Settings", "Direct IP Access",
         "Security", "Permanent Password", "Allow Incoming Connections",
         "Two-Factor Authentication", "Appearance", "Dark Theme",
         "Dashboard", "Linked", "Enter Invite Code",
-        "About HopToDesk",
+        "About HopToDesk", "Install", "Error",
+        "You cannot connect to your own computer",
+        "Verification timed out. Please try again.",
+        "Failed to generate 2FA secret. Please try again.",
         "Password Settings", "Cancel", "Save", "Language",
         "Rename", "Add to Favorites", "Remove from Favorites",
         "Forget Password", "Remove", "Rename Peer", "Enter alias",
@@ -905,10 +908,8 @@ fn run_main_ui() {
             "enable-file-transfer": cfg2.get_option("enable-file-transfer"),
             "enable-remote-restart": cfg2.get_option("enable-remote-restart"),
             "enable-tunnel": cfg2.get_option("enable-tunnel"),
-            "enable-remote-printing": cfg2.get_option("enable-remote-printing"),
             "enable-wol": cfg2.get_option("enable-wol"),
             "direct-server": cfg2.get_option("direct-server"),
-            "enable-lan-discovery": cfg2.get_option("enable-lan-discovery"),
             "enable-terminal": cfg2.get_option("enable-terminal"),
             "stop-service": cfg2.get_option("stop-service"),
             "allow-darktheme": cfg2.get_option("allow-darktheme"),
@@ -1193,6 +1194,7 @@ unsafe extern "system" fn main_timer_callback(
             let parts: Vec<&str> = text.splitn(2, '|').collect();
             if parts.len() == 2 {
                 if let Ok(mut s) = state.lock() {
+                    s.config2 = config::Config2::load();
                     s.config2.set_option(parts[0], parts[1]);
                     s.config2.save();
                 }
@@ -1271,6 +1273,7 @@ unsafe extern "system" fn main_timer_callback(
             let _ = el.set_text("");
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Ok(mut s) = state.lock() {
+                    s.config2 = config::Config2::load();
                     s.config2.set_option("socks-proxy", v["proxy"].as_str().unwrap_or(""));
                     s.config2.set_option("socks-username", v["username"].as_str().unwrap_or(""));
                     s.config2.set_option("socks-password", v["password"].as_str().unwrap_or(""));
@@ -1371,6 +1374,7 @@ unsafe extern "system" fn main_timer_callback(
         if !text.is_empty() {
             let _ = el.set_text("");
             if let Ok(mut s) = state.lock() {
+                s.config2 = config::Config2::load();
                 s.config2.set_option("custom-rendezvous-server", &text);
                 s.config2.save();
                 config::write_log(&format!("[UI] Custom network set to: {}", text));
@@ -1383,6 +1387,7 @@ unsafe extern "system" fn main_timer_callback(
         if !text.is_empty() {
             let _ = el.set_text("");
             if let Ok(mut s) = state.lock() {
+                s.config2 = config::Config2::load();
                 s.config2.set_option("invite_code", &text);
                 s.config2.save();
                 config::write_log(&format!("[UI] Invite code set: {}", text));

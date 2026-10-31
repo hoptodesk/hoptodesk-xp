@@ -922,5 +922,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("A secure connection could not be established. Continue anyway?", "Не удалось установить защищённое соединение. Всё равно продолжить?"),
         ("Connection not secure", "Соединение не защищено"),
         ("Ticket submitted but attachment upload failed: ", "Тикет отправлен, но не удалось загрузить вложение: "),
+        ("You cannot connect to your own computer", "Нельзя подключиться к собственному компьютеру"),
+        ("Verification timed out. Please try again.", "Время проверки истекло. Повторите попытку."),
+        ("Failed to generate 2FA secret. Please try again.", "Не удалось создать ключ 2FA. Повторите попытку."),
     ].iter().cloned().collect();
 }

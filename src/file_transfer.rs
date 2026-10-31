@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 const BLOCK_SIZE: usize = 128 * 1024;
-const MAX_DECOMPRESSED_SIZE: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_DECOMPRESSED_SIZE: u64 = 16 * 1024 * 1024;
 
 pub fn read_dir_to_proto(path: &str, include_hidden: bool) -> io::Result<message_proto::FileDirectory> {
     let dir = Path::new(path);

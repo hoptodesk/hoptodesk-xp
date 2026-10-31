@@ -46,6 +46,21 @@ pub fn get_dashboard_user_id() -> String {
     cfg.get_option("dashboard_user_id")
 }
 
+pub fn get_device_key() -> String {
+    Config2::load().get_option("dashboard-device-key")
+}
+
+fn store_device_key(value: &serde_json::Value) {
+    if let Some(key) = value.as_str() {
+        if !key.is_empty() && key != get_device_key() {
+            let mut cfg2 = Config2::load();
+            cfg2.set_option("dashboard-device-key", key);
+            cfg2.save();
+            config::write_log("[dashboard] Stored device key");
+        }
+    }
+}
+
 pub fn validate_invite(invite_code: &str) -> Result<(String, String, String, String), String> {
     let url = format!(
         "{}?action=validateInvite&invite_code={}",
@@ -125,13 +140,18 @@ pub fn register_device(
     mac: &str,
 ) -> Result<String, String> {
     let url = format!("{}?action=registerDevice", DASHBOARD_API_URL);
+    let device_key = get_device_key();
     let mut params: Vec<(&str, &str)> = vec![
         ("device_id", device_id),
         ("device_name", device_name),
         ("computer_name", device_name),
         ("os", os_name),
         ("mac_address", mac),
+        ("key_capable", "1"),
     ];
+    if !device_key.is_empty() {
+        params.push(("device_key", &device_key));
+    }
     if !enrollment_token.is_empty() {
         params.push(("enrollment_token", enrollment_token));
     }
@@ -144,6 +164,7 @@ pub fn register_device(
     if resp["success"].as_bool() != Some(true) {
         return Err(format!("registerDevice failed: {}", resp));
     }
+    store_device_key(&resp["device_key"]);
     let dashboard_user_id = resp["dashboard_user_id"]
         .as_str()
         .unwrap_or("")
@@ -384,6 +405,7 @@ fn handle_incoming_message(text: &str) -> Result<Option<(String, serde_json::Val
                 match event {
                     "registered" => {
                         if let Some(data) = arr.get(1) {
+                            store_device_key(&data["device_key"]);
                             if let Some(uid) = data["dashboard_user_id"].as_str() {
                                 if !uid.is_empty() && get_dashboard_user_id().is_empty() {
                                     let mut cfg2 = Config2::load();
@@ -400,6 +422,7 @@ fn handle_incoming_message(text: &str) -> Result<Option<(String, serde_json::Val
                         let mut cfg2 = Config2::load();
                         cfg2.set_option("dashboard_user_id", "");
                         cfg2.set_option("invite_code", "");
+                        cfg2.set_option("dashboard-device-key", "");
                         cfg2.save();
                         return Err("Device unlinked from dashboard".to_string());
                     }
@@ -474,6 +497,9 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
     let register_data = serde_json::json!({
         "device_id": device_id,
         "dashboard_user_id": dashboard_user_id,
+        "key_capable": true,
+        "key_scheme": 2,
+        "device_key": get_device_key(),
         "timezone": timezone,
         "computer_name": computer_name,
         "os": "windows",
@@ -764,11 +790,15 @@ pub fn get_my_tickets() -> Result<serde_json::Value, String> {
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();
     let dashboard_user_id = get_dashboard_user_id();
-    let url = format!(
-        "{}?action=getMyTickets&device_id={}&dashboard_user_id={}",
-        DASHBOARD_API_URL, device_id, dashboard_user_id
-    );
-    let body = wininet::http_get(&url)?;
+    let url = format!("{}?action=getMyTickets", DASHBOARD_API_URL);
+    let body = wininet::http_post_form(
+        &url,
+        &[
+            ("device_id", &device_id),
+            ("dashboard_user_id", &dashboard_user_id),
+            ("device_key", &get_device_key()),
+        ],
+    )?;
     let resp: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
     if resp["success"].as_bool() != Some(true) {
@@ -789,6 +819,7 @@ pub fn get_conversation(ticket_id: i64) -> Result<serde_json::Value, String> {
         &[
             ("ticket_id", &ticket_id.to_string()),
             ("device_id", &device_id),
+            ("device_key", &get_device_key()),
         ],
     )?;
     let resp: serde_json::Value =
@@ -811,6 +842,7 @@ pub fn add_reply(ticket_id: i64, message: &str) -> Result<(), String> {
         &[
             ("ticket_id", &ticket_id.to_string()),
             ("device_id", &device_id),
+            ("device_key", &get_device_key()),
             ("message", message),
         ],
     )?;
@@ -828,11 +860,15 @@ pub fn add_reply(ticket_id: i64, message: &str) -> Result<(), String> {
 pub fn get_attachments(ticket_id: i64) -> Result<serde_json::Value, String> {
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();
-    let url = format!(
-        "{}?action=getAttachments&ticket_id={}&device_id={}",
-        DASHBOARD_API_URL, ticket_id, device_id
-    );
-    let body = wininet::http_get(&url)?;
+    let url = format!("{}?action=getAttachments", DASHBOARD_API_URL);
+    let body = wininet::http_post_form(
+        &url,
+        &[
+            ("ticket_id", &ticket_id.to_string()),
+            ("device_id", &device_id),
+            ("device_key", &get_device_key()),
+        ],
+    )?;
     let resp: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
     if resp["success"].as_bool() != Some(true) {
@@ -870,6 +906,7 @@ pub fn upload_attachment(ticket_id: i64, file_path: &str) -> Result<(), String> 
             ("action", "customerUploadAttachment"),
             ("ticket_id", &ticket_id.to_string()),
             ("device_id", &device_id),
+            ("device_key", &get_device_key()),
             ("customer_name", "Customer"),
         ],
         "file",

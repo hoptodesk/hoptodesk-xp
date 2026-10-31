@@ -21,7 +21,7 @@ pub struct EventBinding {
 pub struct Engine {
     pub doc: Document,
     pub sheets: Vec<Stylesheet>,
-    pub timers: Vec<(f64, SV)>,
+    pub timers: Vec<(f64, SV, f64)>,
     pub now_ms: f64,
     pub caret_solid: bool,
     pub scale: f32,
@@ -5580,10 +5580,10 @@ fn timer_fn_eq(a: &SV, b: &SV) -> bool {
 // and would trigger spurious reconnects.
 pub fn schedule_timer(engine: &EngineRef, due: f64, f: SV) {
     let mut e = engine.borrow_mut();
-    e.timers.retain(|(_, existing)| !timer_fn_eq(existing, &f));
+    e.timers.retain(|(_, existing, _)| !timer_fn_eq(existing, &f));
     if due > 0.0 {
         let now = e.now_ms;
-        e.timers.push((now + due, f));
+        e.timers.push((now + due, f, due));
     }
 }
 
@@ -5594,24 +5594,32 @@ pub fn pump_timers(interp: &mut Interp, engine: &EngineRef, until_ms: f64) -> SR
             e.timers
                 .iter()
                 .enumerate()
-                .filter(|(_, (due, _))| *due <= until_ms)
+                .filter(|(_, (due, _, _))| *due <= until_ms)
                 .min_by(|a, b| a.1 .0.partial_cmp(&b.1 .0).unwrap())
-                .map(|(i, (due, _))| (i, *due))
+                .map(|(i, (due, _, _))| (i, *due))
         };
         let (idx, due) = match next {
             Some(v) => v,
             None => break,
         };
-        let f = {
+        let (f, interval) = {
             let mut e = engine.borrow_mut();
             e.now_ms = due;
-            e.timers.remove(idx).1
+            let t = e.timers.remove(idx);
+            (t.1, t.2)
         };
         if matches!(f, SV::Function(_) | SV::NativeFn(_)) {
             // A throwing timer must not abort the rest of the batch - the
             // remaining timers are already dequeued and would be lost.
-            if let Err(err) = interp.call_value(&f, &SV::Undefined, &[]) {
-                eprintln!("timer error: {}", err.0);
+            match interp.call_value(&f, &SV::Undefined, &[]) {
+                Err(err) => eprintln!("timer error: {}", err.0),
+                Ok(SV::Bool(true)) if interval > 0.0 => {
+                    let mut e = engine.borrow_mut();
+                    if !e.timers.iter().any(|(_, g, _)| timer_fn_eq(g, &f)) {
+                        e.timers.push((until_ms + interval, f, interval));
+                    }
+                }
+                Ok(_) => {}
             }
         }
     }
@@ -5627,7 +5635,7 @@ pub fn pump_timers(interp: &mut Interp, engine: &EngineRef, until_ms: f64) -> SR
         let mut extra: Vec<SV> = Vec::new();
         for eng in live_engines(engine) {
             let e = eng.borrow();
-            extra.extend(e.timers.iter().map(|(_, f)| f.clone()));
+            extra.extend(e.timers.iter().map(|(_, f, _)| f.clone()));
             extra.extend(
                 e.events
                     .iter()

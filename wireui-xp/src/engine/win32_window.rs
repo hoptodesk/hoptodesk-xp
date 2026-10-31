@@ -721,7 +721,7 @@ fn engine_tick(hwnd: HWND, st: &mut WinState) {
     }
     let due = {
         let e = engine.borrow();
-        e.timers.iter().any(|(t, _)| *t <= now)
+        e.timers.iter().any(|(t, _, _)| *t <= now)
     };
     if due {
         with_interp(|interp| {

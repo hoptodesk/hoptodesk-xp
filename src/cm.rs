@@ -12,13 +12,13 @@ extern "system" {
     fn GetWindowRect(hwnd: *mut std::ffi::c_void, rect: *mut [i32; 4]) -> i32;
     fn MoveWindow(hwnd: *mut std::ffi::c_void, x: i32, y: i32, w: i32, h: i32, repaint: i32) -> i32;
     fn ShowWindow(hwnd: *mut std::ffi::c_void, cmd: i32) -> i32;
+    fn IsIconic(hwnd: *mut std::ffi::c_void) -> i32;
 }
 
 static mut CM_SESSION_ID: Option<String> = None;
 static mut CM_HWND: sciter::types::HWINDOW = std::ptr::null_mut();
 static mut CM_RESPONDED: bool = false;
 static mut CM_CHAT_LINES_READ: usize = 0;
-static mut CM_CHAT_PANEL_RESIZED: bool = false;
 static mut CM_ACCEPTED_TICK: u32 = 0;
 static mut CM_MINIMIZED: bool = false;
 static mut CM_INVITE: Option<(String, String, String)> = None;
@@ -390,7 +390,6 @@ pub fn run_cm_process(session_id: &str) {
         CM_HWND = hwnd;
         CM_RESPONDED = false;
         CM_CHAT_LINES_READ = 0;
-        CM_CHAT_PANEL_RESIZED = false;
         SetTimer(hwnd as *mut std::ffi::c_void, 1, 200, Some(cm_timer_callback));
     }
 
@@ -570,21 +569,20 @@ unsafe extern "system" fn cm_timer_callback(
             if let Ok(Some(mut chat)) = root.find_first("#right-panel") {
                 let _ = chat.set_style_attribute("display", "block");
             }
+            let _ = root.eval_script("show_chat = true;");
 
-            if !CM_CHAT_PANEL_RESIZED {
-                CM_CHAT_PANEL_RESIZED = true;
-                let hwnd_ptr = CM_HWND as *mut std::ffi::c_void;
-                let mut rect = [0i32; 4];
-                if GetWindowRect(hwnd_ptr, &mut rect) != 0 {
-                    let x = rect[0];
-                    let y = rect[1];
-                    let w = rect[2] - rect[0];
-                    let h = rect[3] - rect[1];
-                    if w < 600 {
-
-                        let new_x = x - (600 - w);
-                        MoveWindow(hwnd_ptr, new_x, y, 600, h, 1);
-                    }
+            let hwnd_ptr = CM_HWND as *mut std::ffi::c_void;
+            if IsIconic(hwnd_ptr) != 0 {
+                ShowWindow(hwnd_ptr, 9);
+            }
+            let mut rect = [0i32; 4];
+            if GetWindowRect(hwnd_ptr, &mut rect) != 0 {
+                let x = rect[0];
+                let y = rect[1];
+                let w = rect[2] - rect[0];
+                let h = rect[3] - rect[1];
+                if w < 600 {
+                    MoveWindow(hwnd_ptr, x - (600 - w), y, 600, h, 1);
                 }
             }
         }

@@ -419,7 +419,8 @@ unsafe extern "system" fn remote_timer_callback(
             let txt = el.get_text();
             if !txt.is_empty() {
                 let _ = el.set_text("");
-                retry_connection_with_password(&txt);
+                client::set_remember_password(txt.starts_with('1'));
+                retry_connection_with_password(&txt[1..]);
 
                 return;
             }
@@ -664,7 +665,8 @@ unsafe extern "system" fn remote_timer_callback(
         let txt = el.get_text();
         if !txt.is_empty() {
             let _ = el.set_text("");
-            retry_connection_with_password(&txt);
+            client::set_remember_password(txt.starts_with('1'));
+            retry_connection_with_password(&txt[1..]);
             return;
         }
     }
@@ -1125,10 +1127,32 @@ unsafe fn process_file_responses(
             }
             Some(message_proto::file_response::Union::Digest(digest)) => {
                 crate::config::write_log(&format!("[remote/ft] Digest: id={} file_num={} file_size={} is_upload={}", digest.id, digest.file_num, digest.file_size, digest.is_upload));
+                let local_path = FT_JOBS.as_ref().and_then(|jobs| jobs.get(&digest.id)).map(|job| {
+                    let fnum = digest.file_num as usize;
+                    match job.files.get(fnum) {
+                        Some(p) if !p.is_empty() => p.clone(),
+                        _ => job.dest_path.clone(),
+                    }
+                });
+                if !digest.is_upload && local_path.as_deref().map_or(false, |p| !std::path::Path::new(p).exists()) {
+                    let mut sc = message_proto::FileTransferSendConfirmRequest::new();
+                    sc.id = digest.id;
+                    sc.file_num = digest.file_num;
+                    sc.set_offset_blk(0);
+                    let mut fa = message_proto::FileAction::new();
+                    fa.set_send_confirm(sc);
+                    client::send_file_action(client_state, fa);
+                    continue;
+                }
+                let name = local_path
+                    .as_deref()
+                    .and_then(|p| std::path::Path::new(p).file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 let _ = root.call_method("overrideFileConfirm", &[
                     sciter::Value::from(digest.id),
                     sciter::Value::from(digest.file_num),
-                    sciter::Value::from(""),
+                    sciter::Value::from(name.as_str()),
                     sciter::Value::from(digest.is_upload),
                     sciter::Value::from(digest.is_identical),
                 ]);

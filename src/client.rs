@@ -332,17 +332,67 @@ pub fn connect_direct_stream(addrs: &[String]) -> Option<FramedStream> {
     None
 }
 
+static REMEMBER_PASSWORD: AtomicBool = AtomicBool::new(true);
+
+pub fn set_remember_password(remember: bool) {
+    REMEMBER_PASSWORD.store(remember, Ordering::Relaxed);
+}
+
+fn test_delay_reply(td: &message_proto::TestDelay) -> Option<message_proto::Message> {
+    if td.from_client {
+        return None;
+    }
+    let mut reply = message_proto::Message::new();
+    reply.set_test_delay(td.clone());
+    Some(reply)
+}
+
 fn wait_for_first_message(stream: FramedStream) -> io::Result<FramedStream> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let peeked = stream.tcp_stream().peek(&mut [0u8; 1]);
+    let peeked = peek_first_frame(stream.tcp_stream());
     stream.set_read_timeout(None)?;
-    match peeked {
-        Ok(0) => Err(io::Error::new(io::ErrorKind::ConnectionAborted, "peer closed before its first message")),
-        Ok(_) => Ok(stream),
+    let frame = match peeked {
+        Ok(frame) => frame,
         Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
-            Err(io::Error::new(io::ErrorKind::TimedOut, "no first message from peer"))
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "no first message from peer"));
         }
-        Err(e) => Err(e),
+        Err(e) => return Err(e),
+    };
+    match message_proto::Message::parse_from_bytes(&frame).map(|m| m.union) {
+        Ok(Some(message_proto::message::Union::SignedId(_))) => Ok(stream),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the address answered but is not a HopToDesk host",
+        )),
+    }
+}
+
+fn peek_first_frame(tcp: &std::net::TcpStream) -> io::Result<Vec<u8>> {
+    let mut buf = [0u8; 4096];
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let got = tcp.peek(&mut buf)?;
+        if got == 0 {
+            return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "peer closed before its first message"));
+        }
+        let head_len = ((buf[0] & 0x3) + 1) as usize;
+        if got >= head_len {
+            let mut n = 0usize;
+            for (i, b) in buf[..head_len].iter().enumerate() {
+                n |= (*b as usize) << (8 * i);
+            }
+            n >>= 2;
+            if head_len + n > buf.len() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "first message too large"));
+            }
+            if got >= head_len + n {
+                return Ok(buf[head_len..head_len + n].to_vec());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "no full first message from peer"));
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -440,16 +490,9 @@ pub fn send_invite_on_stream(
                 return Ok(answer.accepted);
             }
             Some(message_proto::message::Union::TestDelay(td)) => {
-                if td.from_client {
-                    continue;
+                if let Some(reply) = test_delay_reply(&td) {
+                    stream.send_msg(&reply.write_to_bytes().map_err(io_err)?)?;
                 }
-                let mut echo = message_proto::TestDelay::new();
-                echo.time = td.time;
-                echo.last_delay = td.last_delay;
-                echo.from_client = true;
-                let mut reply = message_proto::Message::new();
-                reply.set_test_delay(echo);
-                stream.send_msg(&reply.write_to_bytes().map_err(io_err)?)?;
             }
             Some(message_proto::message::Union::Misc(misc)) => {
                 if let Some(message_proto::misc::Union::CloseReason(reason)) = &misc.union {
@@ -674,6 +717,7 @@ fn run_client_inner(
         decoding.prefer = message_proto::supported_decoding::PreferCodec::VP8.into();
         option.supported_decoding = protobuf::MessageField::some(decoding);
         option.enable_file_transfer = message_proto::option_message::BoolOption::Yes.into();
+        option.disable_audio = message_proto::option_message::BoolOption::Yes.into();
         lr.option = protobuf::MessageField::some(option);
 
         let mut resp = message_proto::SwitchSidesResponse::new();
@@ -707,6 +751,7 @@ fn run_client_inner(
         decoding.prefer = message_proto::supported_decoding::PreferCodec::VP8.into();
         option.supported_decoding = protobuf::MessageField::some(decoding);
         option.enable_file_transfer = message_proto::option_message::BoolOption::Yes.into();
+        option.disable_audio = message_proto::option_message::BoolOption::Yes.into();
         lr.option = protobuf::MessageField::some(option);
 
         if file_transfer {
@@ -738,14 +783,9 @@ fn run_client_inner(
                 break;
             }
             Some(message_proto::message::Union::TestDelay(td)) => {
-
-                let mut resp = message_proto::TestDelay::new();
-                resp.time = td.time;
-                resp.last_delay = td.last_delay;
-                resp.from_client = true;
-                let mut reply = message_proto::Message::new();
-                reply.set_test_delay(resp);
-                stream.send_msg(&reply.write_to_bytes().map_err(io_err)?)?;
+                if let Some(reply) = test_delay_reply(&td) {
+                    stream.send_msg(&reply.write_to_bytes().map_err(io_err)?)?;
+                }
                 continue;
             }
             Some(message_proto::message::Union::Misc(misc)) => {
@@ -832,13 +872,9 @@ fn run_client_inner(
                         continue;
                     }
                     Some(message_proto::message::Union::TestDelay(td)) => {
-                        let mut resp = message_proto::TestDelay::new();
-                        resp.time = td.time;
-                        resp.last_delay = td.last_delay;
-                        resp.from_client = true;
-                        let mut reply = message_proto::Message::new();
-                        reply.set_test_delay(resp);
-                        let _ = stream.send_msg(&reply.write_to_bytes().map_err(io_err)?);
+                        if let Some(reply) = test_delay_reply(&td) {
+                            let _ = stream.send_msg(&reply.write_to_bytes().map_err(io_err)?);
+                        }
                         continue;
                     }
                     _ => continue,
@@ -877,9 +913,13 @@ fn run_client_inner(
 
             if !password.is_empty() {
                 let mut peer_cfg = crate::config::PeerConfig::load(target_id);
-                peer_cfg.set_option("password", password);
+                if REMEMBER_PASSWORD.load(Ordering::Relaxed) {
+                    peer_cfg.set_option("password", password);
+                    crate::config::write_log("[client] Saved password to peer config");
+                } else {
+                    peer_cfg.set_option("password", "");
+                }
                 peer_cfg.save(target_id);
-                crate::config::write_log("[client] Saved password to peer config");
             }
 
             {
@@ -1060,14 +1100,7 @@ fn run_client_inner(
                     }
                 }
                 Some(message_proto::message::Union::TestDelay(td)) => {
-
-                    let mut resp = message_proto::TestDelay::new();
-                    resp.time = td.time;
-                    resp.last_delay = td.last_delay;
-                    resp.from_client = true;
-                    let mut reply = message_proto::Message::new();
-                    reply.set_test_delay(resp);
-                    if let Ok(bytes) = reply.write_to_bytes() {
+                    if let Some(bytes) = test_delay_reply(&td).and_then(|r| r.write_to_bytes().ok()) {
                         if let Ok(mut s) = stream.lock() {
                             let _ = s.send_msg(&bytes);
                         }

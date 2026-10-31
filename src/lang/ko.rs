@@ -922,5 +922,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("A secure connection could not be established. Continue anyway?", "보안 연결을 설정할 수 없습니다. 계속하시겠습니까?"),
         ("Connection not secure", "연결이 안전하지 않음"),
         ("Ticket submitted but attachment upload failed: ", "티켓이 제출되었지만 첨부 파일 업로드에 실패했습니다: "),
+        ("You cannot connect to your own computer", "자신의 컴퓨터에는 연결할 수 없습니다"),
+        ("Verification timed out. Please try again.", "인증 시간이 초과되었습니다. 다시 시도하세요."),
+        ("Failed to generate 2FA secret. Please try again.", "2FA 비밀 키를 생성하지 못했습니다. 다시 시도하세요."),
     ].iter().cloned().collect();
 }

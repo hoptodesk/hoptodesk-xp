@@ -922,5 +922,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("A secure connection could not be established. Continue anyway?", "Nem sikerült biztonságos kapcsolatot létesíteni. Mégis folytatja?"),
         ("Connection not secure", "A kapcsolat nem biztonságos"),
         ("Ticket submitted but attachment upload failed: ", "A jegy elküldve, de a melléklet feltöltése nem sikerült: "),
+        ("You cannot connect to your own computer", "Nem csatlakozhat a saját számítógépéhez"),
+        ("Verification timed out. Please try again.", "Az ellenőrzés időtúllépés miatt megszakadt. Próbálja újra."),
+        ("Failed to generate 2FA secret. Please try again.", "Nem sikerült létrehozni a 2FA kulcsot. Próbálja újra."),
     ].iter().cloned().collect();
 }

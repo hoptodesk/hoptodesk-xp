@@ -337,17 +337,7 @@ pub fn run_session_public(
         };
 
         match &msg.union {
-            Some(message_proto::message::Union::TestDelay(td)) => {
-                if td.from_client {
-                    continue;
-                }
-                let mut resp = message_proto::TestDelay::new();
-                resp.time = td.time;
-                resp.last_delay = td.last_delay;
-                resp.from_client = false;
-                let mut reply = message_proto::Message::new();
-                reply.set_test_delay(resp);
-                stream.send_msg(&reply.write_to_bytes().map_err(io_err)?)?;
+            Some(message_proto::message::Union::TestDelay(_)) => {
                 continue;
             }
             Some(message_proto::message::Union::Misc(_)) => {
@@ -476,17 +466,7 @@ pub fn run_session_public(
                 if let Ok(data) = recv {
                     if let Ok(msg) = message_proto::Message::parse_from_bytes(&data) {
                         match &msg.union {
-                            Some(message_proto::message::Union::TestDelay(td)) => {
-                                if !td.from_client {
-                                    let mut resp = message_proto::TestDelay::new();
-                                    resp.time = td.time;
-                                    resp.last_delay = td.last_delay;
-                                    resp.from_client = false;
-                                    let mut reply = message_proto::Message::new();
-                                    reply.set_test_delay(resp);
-                                    let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
-                                }
-                            }
+                            Some(message_proto::message::Union::TestDelay(_)) => {}
                             Some(message_proto::message::Union::LoginRequest(new_lr)) => {
 
                                 if new_lr.password.len() == 32 {
@@ -622,15 +602,7 @@ pub fn run_session_public(
                         stream.send_msg(&msg_err.write_to_bytes().map_err(io_err)?)?;
                     }
                 }
-                Some(message_proto::message::Union::TestDelay(td)) => {
-                    let mut resp_td = message_proto::TestDelay::new();
-                    resp_td.time = td.time;
-                    resp_td.last_delay = td.last_delay;
-                    resp_td.from_client = false;
-                    let mut reply = message_proto::Message::new();
-                    reply.set_test_delay(resp_td);
-                    let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
-                }
+                Some(message_proto::message::Union::TestDelay(_)) => {}
                 _ => {}
             }
         }
@@ -703,6 +675,7 @@ pub fn run_session_public(
     peer_info.platform = "Windows".to_string();
     peer_info.version = env!("CARGO_PKG_VERSION").to_string();
     peer_info.sas_enabled = crate::install::is_installed();
+    peer_info.platform_additions = serde_json::json!({ "block_input": true }).to_string();
     peer_info.dashboard_linked = !crate::dashboard::get_dashboard_user_id().is_empty();
 
     let displays = capture::enumerate_displays();
@@ -1386,7 +1359,7 @@ fn run_video_input_loop(
             let _ = stream.send_msg(&off.write_to_bytes().map_err(io_err)?);
         }
 
-        if show_remote_cursor && now.duration_since(last_cursor_check) >= Duration::from_millis(100) {
+        if now.duration_since(last_cursor_check) >= Duration::from_millis(100) {
             last_cursor_check = now;
             if let Some(cs) = platform::get_cursor() {
                 if cs.visible {
@@ -1416,7 +1389,7 @@ fn run_video_input_loop(
                         }
                     }
                     let pos = (cs.x - display_x, cs.y - display_y);
-                    if pos != last_cursor_pos {
+                    if show_remote_cursor && pos != last_cursor_pos {
                         last_cursor_pos = pos;
                         let mut cp = message_proto::CursorPosition::new();
                         cp.x = pos.0;
@@ -1523,6 +1496,8 @@ const WHEEL_DELTA: i32 = 120;
 const MOUSE_BUTTON_LEFT: i32 = 0x01;
 const MOUSE_BUTTON_RIGHT: i32 = 0x02;
 const MOUSE_BUTTON_WHEEL: i32 = 0x04;
+const MOUSE_BUTTON_BACK: i32 = 0x08;
+const MOUSE_BUTTON_FORWARD: i32 = 0x10;
 
 static NEXT_SESSION_ID: AtomicU32 = AtomicU32::new(1);
 static MOUSE_OWNER_SESSION: AtomicU32 = AtomicU32::new(0);
@@ -2265,8 +2240,6 @@ fn handle_file_action(
                     file_num: 0,
                     done: false,
                 });
-
-                send_upload_overwrite_decision(stream, id, 0, &dest_path, client_file_size)?;
             } else {
 
                 for (i, fe) in recv_req.files.iter().enumerate() {
@@ -2287,8 +2260,6 @@ fn handle_file_action(
                         file_num: i as i32,
                         done: false,
                     });
-
-                    send_upload_overwrite_decision(stream, id, i as i32, &file_path, fe.size)?;
                 }
                 crate::config::write_log(&format!("[server/ft] Processed {} files for multi-file upload", recv_req.files.len()));
             }
@@ -2565,6 +2536,12 @@ fn handle_file_response_server(
                 }
             } else {
                 crate::config::write_log(&format!("[server/ft] Received block for unknown job: id={} file_num={} key={}", block.id, block.file_num, key));
+            }
+        }
+        Some(message_proto::file_response::Union::Digest(d)) => {
+            if let Some(job) = write_jobs.get(&(d.id * 1000 + d.file_num)) {
+                let path = job.path.clone();
+                send_upload_overwrite_decision(stream, d.id, d.file_num, &path, d.file_size)?;
             }
         }
         Some(message_proto::file_response::Union::Done(done)) => {

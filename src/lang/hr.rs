@@ -922,5 +922,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("A secure connection could not be established. Continue anyway?", "Nije moguće uspostaviti sigurnu vezu. Svejedno nastaviti?"),
         ("Connection not secure", "Veza nije sigurna"),
         ("Ticket submitted but attachment upload failed: ", "Zahtjev je poslan, ali prijenos privitka nije uspio: "),
+        ("You cannot connect to your own computer", "Ne možete se povezati s vlastitim računalom"),
+        ("Verification timed out. Please try again.", "Provjera je istekla. Pokušajte ponovno."),
+        ("Failed to generate 2FA secret. Please try again.", "Generiranje 2FA ključa nije uspjelo. Pokušajte ponovno."),
     ].iter().cloned().collect();
 }

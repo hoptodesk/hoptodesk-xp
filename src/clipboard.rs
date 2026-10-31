@@ -3,26 +3,19 @@ use crate::platform;
 use crate::protocol::message_proto;
 
 fn decompress(data: &[u8]) -> Option<Vec<u8>> {
+    let out = crate::file_transfer::zstd_decompress(data);
+    if !out.is_empty() {
+        return Some(out);
+    }
     use flate2::read::ZlibDecoder;
     use std::io::Read;
-    let mut decoder = ZlibDecoder::new(data);
+    let limit = crate::file_transfer::MAX_DECOMPRESSED_SIZE;
     let mut out = Vec::new();
-    decoder.read_to_end(&mut out).ok()?;
-    Some(out)
-}
-
-fn compress(data: &[u8]) -> Option<Vec<u8>> {
-    use flate2::write::ZlibEncoder;
-    use flate2::Compression;
-    use std::io::Write;
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(data).ok()?;
-    let compressed = encoder.finish().ok()?;
-    if compressed.len() < data.len() {
-        Some(compressed)
-    } else {
-        None
+    ZlibDecoder::new(data).take(limit + 1).read_to_end(&mut out).ok()?;
+    if out.len() as u64 > limit {
+        return None;
     }
+    Some(out)
 }
 
 fn extract_text_from_clipboard(cb: &message_proto::Clipboard) -> Option<String> {
@@ -78,17 +71,9 @@ pub fn handle_multi_clipboards_message(mc: &message_proto::MultiClipboards) {
 }
 
 pub fn make_clipboard_message(text: &str) -> message_proto::Message {
-    let raw = text.as_bytes();
     let mut cb = message_proto::Clipboard::new();
     cb.format = message_proto::ClipboardFormat::Text.into();
-
-    if let Some(compressed) = compress(raw) {
-        cb.compress = true;
-        cb.content = compressed;
-    } else {
-        cb.compress = false;
-        cb.content = raw.to_vec();
-    }
+    cb.content = text.as_bytes().to_vec().into();
 
     let mut msg = message_proto::Message::new();
     msg.set_clipboard(cb);
