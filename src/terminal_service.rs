@@ -38,6 +38,139 @@ fn io_err<E: std::fmt::Display>(e: E) -> io::Error {
     io::Error::new(io::ErrorKind::Other, e.to_string())
 }
 
+extern "system" {
+    fn GetOEMCP() -> u32;
+    fn IsDBCSLeadByteEx(code_page: u32, test_char: u8) -> i32;
+    fn MultiByteToWideChar(
+        code_page: u32,
+        flags: u32,
+        src: *const u8,
+        src_len: i32,
+        dst: *mut u16,
+        dst_len: i32,
+    ) -> i32;
+    fn WideCharToMultiByte(
+        code_page: u32,
+        flags: u32,
+        src: *const u16,
+        src_len: i32,
+        dst: *mut u8,
+        dst_len: i32,
+        default_char: *const u8,
+        used_default: *mut i32,
+    ) -> i32;
+}
+
+const CP_UTF8: u32 = 65001;
+
+fn shell_code_page() -> u32 {
+    unsafe { GetOEMCP() }
+}
+
+fn complete_prefix_len(code_page: u32, bytes: &[u8]) -> usize {
+    let mut i = 0;
+    while i < bytes.len() {
+        if unsafe { IsDBCSLeadByteEx(code_page, bytes[i]) } != 0 {
+            if i + 1 >= bytes.len() {
+                return i;
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    bytes.len()
+}
+
+fn shell_bytes_to_utf8(code_page: u32, pending: &mut Vec<u8>, bytes: &[u8]) -> Vec<u8> {
+    if code_page == CP_UTF8 {
+        return bytes.to_vec();
+    }
+    pending.extend_from_slice(bytes);
+    let end = complete_prefix_len(code_page, pending);
+    let chunk: Vec<u8> = pending.drain(..end).collect();
+    if chunk.is_empty() {
+        return Vec::new();
+    }
+    unsafe {
+        let len = MultiByteToWideChar(code_page, 0, chunk.as_ptr(), chunk.len() as i32, std::ptr::null_mut(), 0);
+        if len <= 0 {
+            return chunk;
+        }
+        let mut wide = vec![0u16; len as usize];
+        MultiByteToWideChar(code_page, 0, chunk.as_ptr(), chunk.len() as i32, wide.as_mut_ptr(), len);
+        String::from_utf16_lossy(&wide).into_bytes()
+    }
+}
+
+fn utf8_to_shell_bytes(code_page: u32, text: &str) -> Vec<u8> {
+    if code_page == CP_UTF8 || text.is_ascii() {
+        return text.as_bytes().to_vec();
+    }
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    unsafe {
+        let len = WideCharToMultiByte(
+            code_page,
+            0,
+            wide.as_ptr(),
+            wide.len() as i32,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        );
+        if len <= 0 {
+            return text.as_bytes().to_vec();
+        }
+        let mut out = vec![0u8; len as usize];
+        WideCharToMultiByte(
+            code_page,
+            0,
+            wide.as_ptr(),
+            wide.len() as i32,
+            out.as_mut_ptr(),
+            len,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        );
+        out
+    }
+}
+
+fn spawn_output_reader<R: Read + Send + 'static>(
+    mut source: R,
+    exiting: Arc<AtomicBool>,
+    output_tx: SyncSender<Vec<u8>>,
+    code_page: u32,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let mut buf = vec![0u8; READ_BUF_SIZE];
+        let mut pending = Vec::new();
+        loop {
+            if exiting.load(Ordering::SeqCst) {
+                break;
+            }
+            match source.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let text = shell_bytes_to_utf8(code_page, &mut pending, &buf[..n]);
+                    if text.is_empty() {
+                        continue;
+                    }
+                    match output_tx.try_send(text) {
+                        Ok(_) => {}
+                        Err(TrySendError::Full(v)) => {
+                            let _ = output_tx.send(v);
+                        }
+                        Err(TrySendError::Disconnected(_)) => break,
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    })
+}
+
 #[derive(PartialEq, Eq)]
 enum EscState {
     Normal,
@@ -60,6 +193,7 @@ struct TerminalSession {
     writer: Option<JoinHandle<()>>,
     stderr_reader: Option<JoinHandle<()>>,
     closed_sent: bool,
+    code_page: u32,
 }
 
 impl TerminalSession {
@@ -144,59 +278,9 @@ fn spawn_terminal(terminal_id: i32) -> io::Result<TerminalSession> {
         })
     };
 
-    let reader = {
-        let mut stdout = stdout;
-        let exiting = exiting.clone();
-        let output_tx = output_tx.clone();
-        thread::spawn(move || {
-            let mut buf = vec![0u8; READ_BUF_SIZE];
-            loop {
-                if exiting.load(Ordering::SeqCst) {
-                    break;
-                }
-                match stdout.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        match output_tx.try_send(buf[..n].to_vec()) {
-                            Ok(_) => {}
-                            Err(TrySendError::Full(v)) => {
-                                let _ = output_tx.send(v);
-                            }
-                            Err(TrySendError::Disconnected(_)) => break,
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        })
-    };
-
-    let stderr_reader = {
-        let mut stderr = stderr;
-        let exiting = exiting.clone();
-        let output_tx = output_tx.clone();
-        thread::spawn(move || {
-            let mut buf = vec![0u8; READ_BUF_SIZE];
-            loop {
-                if exiting.load(Ordering::SeqCst) {
-                    break;
-                }
-                match stderr.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        match output_tx.try_send(buf[..n].to_vec()) {
-                            Ok(_) => {}
-                            Err(TrySendError::Full(v)) => {
-                                let _ = output_tx.send(v);
-                            }
-                            Err(TrySendError::Disconnected(_)) => break,
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        })
-    };
+    let code_page = shell_code_page();
+    let reader = spawn_output_reader(stdout, exiting.clone(), output_tx.clone(), code_page);
+    let stderr_reader = spawn_output_reader(stderr, exiting.clone(), output_tx.clone(), code_page);
 
     Ok(TerminalSession {
         pid,
@@ -213,6 +297,7 @@ fn spawn_terminal(terminal_id: i32) -> io::Result<TerminalSession> {
         writer: Some(writer),
         stderr_reader: Some(stderr_reader),
         closed_sent: false,
+        code_page,
     })
 }
 
@@ -435,6 +520,7 @@ fn handle_action(
                 let mut to_send: Vec<Vec<u8>> = Vec::new();
                 let mut ctrl_c = false;
                 let pid = session.pid;
+                let code_page = session.code_page;
                 for ch in input_str.chars() {
                     if session.esc_state == EscState::Esc {
                         if ch == '[' {
@@ -464,7 +550,7 @@ fn handle_action(
                         session.line_buffer.clear();
                         session.cursor = 0;
                         echo.push_str("\r\n");
-                        let mut payload = line.into_bytes();
+                        let mut payload = utf8_to_shell_bytes(code_page, &line);
                         payload.extend_from_slice(b"\r\n");
                         to_send.push(payload);
                     } else if ch == '\x7f' || ch == '\x08' {

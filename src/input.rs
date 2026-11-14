@@ -62,7 +62,7 @@ thread_local! {
         std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
-pub fn release_all_held_keys() {
+fn release_all_held_keys_now() {
     let vks: Vec<u16> = HELD_VKS.with(|h| h.borrow().iter().copied().collect());
     for vk in vks {
         let mut input: INPUT = unsafe { std::mem::zeroed() };
@@ -103,14 +103,14 @@ extern "system" {
 
 const MAPVK_VK_TO_VSC: u32 = 0;
 
-pub fn mouse_move_to(x: i32, y: i32) {
+fn mouse_move_to_now(x: i32, y: i32) {
 
     let (sw, sh) = get_screen_size();
     if sw == 0 || sh == 0 {
         return;
     }
-    let abs_x = ((x as i64 * 65536) / sw as i64) as i32;
-    let abs_y = ((y as i64 * 65536) / sh as i64) as i32;
+    let abs_x = ((x as i64 * 65536 + sw as i64 - 1) / sw as i64) as i32;
+    let abs_y = ((y as i64 * 65536 + sh as i64 - 1) / sh as i64) as i32;
 
     let mut input: INPUT = unsafe { std::mem::zeroed() };
     input.type_ = INPUT_MOUSE;
@@ -149,7 +149,7 @@ pub enum MouseButton {
     Forward,
 }
 
-pub fn mouse_down(button: MouseButton) {
+fn mouse_down_now(button: MouseButton) {
     let (flag, data) = match button {
         MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, 0),
         MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, 0),
@@ -160,7 +160,7 @@ pub fn mouse_down(button: MouseButton) {
     send_mouse_event(flag, data);
 }
 
-pub fn mouse_up(button: MouseButton) {
+fn mouse_up_now(button: MouseButton) {
     let (flag, data) = match button {
         MouseButton::Left => (MOUSEEVENTF_LEFTUP, 0),
         MouseButton::Right => (MOUSEEVENTF_RIGHTUP, 0),
@@ -171,11 +171,11 @@ pub fn mouse_up(button: MouseButton) {
     send_mouse_event(flag, data);
 }
 
-pub fn mouse_scroll(delta: i32) {
+fn mouse_scroll_now(delta: i32) {
     send_mouse_event(MOUSEEVENTF_WHEEL, delta);
 }
 
-pub fn mouse_hscroll(delta: i32) {
+fn mouse_hscroll_now(delta: i32) {
     send_mouse_event(MOUSEEVENTF_HWHEEL, delta);
 }
 
@@ -192,7 +192,7 @@ fn send_mouse_event(flags: u32, data: i32) {
     }
 }
 
-pub fn key_event(scancode: u16, down: bool) {
+fn key_event_now(scancode: u16, down: bool) {
     HELD_SCANCODES.with(|h| {
         let mut set = h.borrow_mut();
         if down {
@@ -214,7 +214,7 @@ pub fn key_event(scancode: u16, down: bool) {
     }
 }
 
-pub fn vk_event(vk: u16, down: bool) {
+fn vk_event_now(vk: u16, down: bool) {
     HELD_VKS.with(|h| {
         let mut set = h.borrow_mut();
         if down {
@@ -235,7 +235,7 @@ pub fn vk_event(vk: u16, down: bool) {
     }
 }
 
-pub fn unicode_char_down(ch: u16) {
+fn unicode_char_down_now(ch: u16) {
     let mut input: INPUT = unsafe { std::mem::zeroed() };
     input.type_ = INPUT_KEYBOARD;
     unsafe {
@@ -248,7 +248,7 @@ pub fn unicode_char_down(ch: u16) {
     }
 }
 
-pub fn unicode_char_up(ch: u16) {
+fn unicode_char_up_now(ch: u16) {
     let mut input: INPUT = unsafe { std::mem::zeroed() };
     input.type_ = INPUT_KEYBOARD;
     unsafe {
@@ -261,10 +261,10 @@ pub fn unicode_char_up(ch: u16) {
     }
 }
 
-pub fn unicode_sequence(text: &str) {
+fn unicode_sequence_now(text: &str) {
     for ch in text.encode_utf16() {
-        unicode_char_down(ch);
-        unicode_char_up(ch);
+        unicode_char_down_now(ch);
+        unicode_char_up_now(ch);
     }
 }
 
@@ -278,57 +278,153 @@ pub fn char_to_vk(ch: char) -> Option<(u16, bool)> {
     Some((vk, shift))
 }
 
-pub fn vk_to_scancode_event(vk: u16, down: bool) {
+fn vk_to_scancode_event_now(vk: u16, down: bool) {
     if is_extended_vk(vk) {
-        vk_event(vk, down);
+        vk_event_now(vk, down);
         return;
     }
     let scan = unsafe { MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) } as u16;
     if scan != 0 {
-        key_event(scan, down);
+        key_event_now(scan, down);
     } else {
-        vk_event(vk, down);
+        vk_event_now(vk, down);
     }
 }
 
-pub fn legacy_char_event(chr: u32, down: bool, has_modifiers: bool) {
+fn legacy_char_event_now(chr: u32, down: bool, has_modifiers: bool) {
     if let Ok(c) = char::try_from(chr) {
         if has_modifiers {
 
             if let Some((vk, _shift)) = char_to_vk(c) {
-                vk_event(vk, down);
+                vk_event_now(vk, down);
             }
         } else if down {
 
-            unicode_char_down(c as u16);
+            unicode_char_down_now(c as u16);
         } else {
-            unicode_char_up(c as u16);
+            unicode_char_up_now(c as u16);
         }
     }
 }
 
-pub fn translate_chr_event(code: u32, down: bool) {
+fn translate_chr_event_now(code: u32, down: bool) {
     let vk_code = (code >> 16) as u16;
     let scancode = (code & 0xFFFF) as u16;
     if vk_code != 0 {
 
-        vk_event(vk_code, down);
+        vk_event_now(vk_code, down);
     } else if scancode != 0 {
 
-        key_event(scancode, down);
+        key_event_now(scancode, down);
     }
 }
 
-pub fn win2win_hotkey_event(code: u32, down: bool) {
+fn win2win_hotkey_event_now(code: u32, down: bool) {
     let unicode = (code & 0x0000FFFF) as u16;
     if down && unicode != 0 {
 
-        unicode_char_down(unicode);
-        unicode_char_up(unicode);
+        unicode_char_down_now(unicode);
+        unicode_char_up_now(unicode);
         return;
     }
     let vk = ((code >> 16) & 0x0000FFFF) as u16;
     if vk != 0 {
-        vk_to_scancode_event(vk, down);
+        vk_to_scancode_event_now(vk, down);
     }
+}
+
+type InputJob = Box<dyn FnOnce() + Send>;
+
+static INPUT_THREAD: std::sync::Mutex<Option<std::sync::mpsc::Sender<InputJob>>> =
+    std::sync::Mutex::new(None);
+
+fn on_input_thread<F: FnOnce() + Send + 'static>(job: F) {
+    let mut guard = INPUT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        let (tx, rx) = std::sync::mpsc::channel::<InputJob>();
+        std::thread::spawn(move || {
+            crate::platform::try_change_desktop();
+            for job in rx {
+                if crate::platform::desktop_changed() {
+                    crate::platform::try_change_desktop();
+                }
+                job();
+            }
+        });
+        *guard = Some(tx);
+    }
+    if let Some(tx) = guard.as_ref() {
+        if tx.send(Box::new(job)).is_err() {
+            *guard = None;
+        }
+    }
+}
+
+pub fn block_input(block: bool) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel();
+    on_input_thread(move || {
+        let _ = tx.send(crate::platform::block_input(block));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or(false)
+}
+
+pub fn release_all_held_keys() {
+    on_input_thread(release_all_held_keys_now);
+}
+
+pub fn mouse_move_to(x: i32, y: i32) {
+    on_input_thread(move || mouse_move_to_now(x, y));
+}
+
+pub fn mouse_down(button: MouseButton) {
+    on_input_thread(move || mouse_down_now(button));
+}
+
+pub fn mouse_up(button: MouseButton) {
+    on_input_thread(move || mouse_up_now(button));
+}
+
+pub fn mouse_scroll(delta: i32) {
+    on_input_thread(move || mouse_scroll_now(delta));
+}
+
+pub fn mouse_hscroll(delta: i32) {
+    on_input_thread(move || mouse_hscroll_now(delta));
+}
+
+pub fn key_event(scancode: u16, down: bool) {
+    on_input_thread(move || key_event_now(scancode, down));
+}
+
+pub fn vk_event(vk: u16, down: bool) {
+    on_input_thread(move || vk_event_now(vk, down));
+}
+
+pub fn unicode_char_down(ch: u16) {
+    on_input_thread(move || unicode_char_down_now(ch));
+}
+
+pub fn unicode_char_up(ch: u16) {
+    on_input_thread(move || unicode_char_up_now(ch));
+}
+
+pub fn unicode_sequence(text: &str) {
+    let text = text.to_string();
+    on_input_thread(move || unicode_sequence_now(&text));
+}
+
+pub fn vk_to_scancode_event(vk: u16, down: bool) {
+    on_input_thread(move || vk_to_scancode_event_now(vk, down));
+}
+
+pub fn legacy_char_event(chr: u32, down: bool, has_modifiers: bool) {
+    on_input_thread(move || legacy_char_event_now(chr, down, has_modifiers));
+}
+
+pub fn translate_chr_event(code: u32, down: bool) {
+    on_input_thread(move || translate_chr_event_now(code, down));
+}
+
+pub fn win2win_hotkey_event(code: u32, down: bool) {
+    on_input_thread(move || win2win_hotkey_event_now(code, down));
 }

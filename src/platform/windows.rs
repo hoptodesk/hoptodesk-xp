@@ -618,7 +618,10 @@ pub fn lock_screen() {
     }
 }
 
-static mut LAST_DESKTOP_INPUT: *mut std::ffi::c_void = std::ptr::null_mut();
+thread_local! {
+    static LAST_DESKTOP_INPUT: std::cell::Cell<*mut std::ffi::c_void> =
+        std::cell::Cell::new(std::ptr::null_mut());
+}
 
 pub fn desktop_changed() -> bool {
     unsafe {
@@ -626,14 +629,9 @@ pub fn desktop_changed() -> bool {
         if hdesk.is_null() {
             return true;
         }
-        let changed = if LAST_DESKTOP_INPUT.is_null() {
-            false
-        } else {
-            hdesk != LAST_DESKTOP_INPUT
-        };
-        LAST_DESKTOP_INPUT = hdesk;
+        let last = LAST_DESKTOP_INPUT.with(|l| l.replace(hdesk));
         CloseDesktop(hdesk);
-        changed
+        !last.is_null() && hdesk != last
     }
 }
 

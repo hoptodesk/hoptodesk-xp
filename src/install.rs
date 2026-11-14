@@ -66,6 +66,24 @@ pub fn is_installed() -> bool {
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+fn private_temp_path(prefix: &str, ext: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "{}-{}.{}",
+        prefix,
+        crate::config::generate_random_string(12),
+        ext
+    ))
+}
+
+fn write_private_file(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    f.write_all(contents.as_bytes())
+}
+
 fn silent_cmd(program: &str) -> Command {
     use std::os::windows::process::CommandExt;
     let mut cmd = Command::new(program);
@@ -138,10 +156,6 @@ fn create_shortcut(
 ) -> Result<(), String> {
     let target_str = target.to_string_lossy().replace('/', "\\");
     let shortcut_str = shortcut_path.to_string_lossy().replace('/', "\\");
-    let temp = std::env::temp_dir().join(format!(
-        "hoptodesk-mkshortcut-{}.vbs",
-        std::process::id()
-    ));
     let args_line = match args {
         Some(a) if !a.is_empty() => format!(
             "sc.Arguments = \"{}\"\n",
@@ -165,7 +179,8 @@ sc.WorkingDirectory = "{wd}"
             .replace('"', "\"\""),
         args_line = args_line,
     );
-    std::fs::write(&temp, vbs).map_err(|e| format!("write shortcut vbs: {}", e))?;
+    let temp = private_temp_path("hoptodesk-mkshortcut", "vbs");
+    write_private_file(&temp, &vbs).map_err(|e| format!("write shortcut vbs: {}", e))?;
     let res = run_cmd(
         "create-shortcut",
         "wscript",
@@ -607,13 +622,10 @@ pub fn uninstall_me() -> Result<(), String> {
     if targets.is_empty() {
         crate::config::write_log("[install] nothing to clean up");
     } else {
-        let bat_path = std::env::temp_dir().join(format!(
-            "hoptodesk-uninstall-{}.bat",
-            std::process::id()
-        ));
+        let bat_path = private_temp_path("hoptodesk-uninstall", "bat");
         let bat_path_str = bat_path.to_string_lossy().replace('/', "\\");
-        let debug_log = std::env::temp_dir()
-            .join("hoptodesk-uninstall-debug.log")
+        let debug_log = bat_path
+            .with_extension("log")
             .to_string_lossy()
             .replace('/', "\\");
 
@@ -651,7 +663,7 @@ pub fn uninstall_me() -> Result<(), String> {
             bat_path_str
         ));
 
-        match std::fs::write(&bat_path, &bat) {
+        match write_private_file(&bat_path, &bat) {
             Ok(_) => crate::config::write_log(&format!(
                 "[install] wrote uninstall bat ({} bytes) to {}",
                 bat.len(),

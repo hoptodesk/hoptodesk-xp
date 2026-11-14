@@ -117,13 +117,18 @@ fn signed_id_matches_target(id: &str, target_id: &str) -> bool {
 
 enum VerifyFailure {
     Signature(String),
-    Identity(String),
+    Identity {
+        detail: String,
+        signed_host: String,
+        session_pk: [u8; 32],
+    },
 }
 
 impl VerifyFailure {
     fn detail(&self) -> &str {
         match self {
-            VerifyFailure::Signature(d) | VerifyFailure::Identity(d) => d,
+            VerifyFailure::Signature(d) => d,
+            VerifyFailure::Identity { detail, .. } => detail,
         }
     }
 }
@@ -137,12 +142,6 @@ fn verified_session_pk(
         .ok_or_else(|| VerifyFailure::Signature("signature did not verify".to_string()))?;
     let id_pk = message_proto::IdPk::parse_from_bytes(&payload)
         .map_err(|e| VerifyFailure::Signature(format!("signed payload is not an IdPk: {}", e)))?;
-    if !signed_id_matches_target(&id_pk.id, target_id) {
-        return Err(VerifyFailure::Identity(format!(
-            "signed id {} does not match {}",
-            id_pk.id, target_id
-        )));
-    }
     if id_pk.pk.len() != 32 {
         return Err(VerifyFailure::Signature(format!(
             "signed session key is {} bytes",
@@ -151,6 +150,13 @@ fn verified_session_pk(
     }
     let mut session_pk = [0u8; 32];
     session_pk.copy_from_slice(&id_pk.pk);
+    if !signed_id_matches_target(&id_pk.id, target_id) {
+        return Err(VerifyFailure::Identity {
+            detail: format!("signed id {} does not match {}", id_pk.id, target_id),
+            signed_host: id_pk.id.clone(),
+            session_pk,
+        });
+    }
     Ok(session_pk)
 }
 
@@ -334,8 +340,14 @@ pub fn connect_direct_stream(addrs: &[String]) -> Option<FramedStream> {
 
 static REMEMBER_PASSWORD: AtomicBool = AtomicBool::new(true);
 
+const LOGIN_WAIT: Duration = Duration::from_secs(90);
+
 pub fn set_remember_password(remember: bool) {
     REMEMBER_PASSWORD.store(remember, Ordering::Relaxed);
+}
+
+pub fn remember_password() -> bool {
+    REMEMBER_PASSWORD.load(Ordering::Relaxed)
 }
 
 fn test_delay_reply(td: &message_proto::TestDelay) -> Option<message_proto::Message> {
@@ -590,11 +602,20 @@ fn client_handshake(
                                     "[client] Peer identity verified against a peer-supplied key; encrypted but not authenticated, key not pinned",
                                 );
                             }
-                            Err(VerifyFailure::Identity(detail)) => {
-                                crate::config::write_log(&format!(
-                                    "[client] Peer-supplied key verified but {}; continuing without encryption",
-                                    detail
-                                ));
+                            Err(VerifyFailure::Identity { detail, signed_host, session_pk }) => {
+                                if signed_host.parse::<std::net::IpAddr>().is_ok() {
+                                    server_pk = session_pk;
+                                    has_server_pk = true;
+                                    crate::config::write_log(&format!(
+                                        "[client] Direct host signed {} for dialed {}; encrypting with the host's own key",
+                                        signed_host, target_id
+                                    ));
+                                } else {
+                                    crate::config::write_log(&format!(
+                                        "[client] Peer-supplied key verified but {}; continuing without encryption",
+                                        detail
+                                    ));
+                                }
                             }
                             Err(failure) => {
                                 return Err(identity_error(
@@ -769,7 +790,7 @@ fn run_client_inner(
 
     stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
     let login_resp;
-    let login_deadline = Instant::now() + Duration::from_secs(30);
+    let login_deadline = Instant::now() + LOGIN_WAIT;
     loop {
         if Instant::now() >= login_deadline {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "Login response timeout"));

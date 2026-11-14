@@ -29,6 +29,7 @@ struct JobWriteState {
     total_size: u64,
     file_num: i32,
     done_count: usize,
+    confirmed_file: Option<i32>,
 }
 
 #[link(name = "user32")]
@@ -55,6 +56,7 @@ extern "system" {
     fn PostMessageA(hwnd: *mut std::ffi::c_void, msg: u32, wparam: usize, lparam: isize) -> i32;
     fn SetWindowTextA(hwnd: *mut std::ffi::c_void, text: *const u8) -> i32;
     fn FillRect(hdc: *mut std::ffi::c_void, rect: *const [i32; 4], brush: *mut std::ffi::c_void) -> i32;
+    fn MessageBoxW(hwnd: *mut std::ffi::c_void, text: *const u16, caption: *const u16, utype: u32) -> i32;
 }
 
 #[link(name = "gdi32")]
@@ -93,6 +95,10 @@ static mut PASSWORD_DIALOG_SHOWN: bool = false;
 static mut RESET_TICK_COUNT: bool = false;
 static mut FT_NEEDS_REMOTE_DIR_REFRESH: bool = false;
 static mut INITIAL_PASSWORD_EMPTY: bool = false;
+static mut ERROR_BOX_SHOWN: bool = false;
+static mut UNSAVED_SESSION_PASSWORD: Option<String> = None;
+
+pub const ENV_PEER_PASSWORD: &str = "HOPTODESK_PEER_PASSWORD";
 
 const WM_CLOSE: u32 = 0x0010;
 
@@ -101,6 +107,29 @@ unsafe fn close_remote_window() {
         stop.store(true, Ordering::Relaxed);
     }
     PostMessageA(REMOTE_HWND as *mut std::ffi::c_void, WM_CLOSE, 0, 0);
+}
+
+unsafe fn show_error_then_close(error: &str) {
+    if ERROR_BOX_SHOWN {
+        return;
+    }
+    ERROR_BOX_SHOWN = true;
+    crate::config::write_log(&format!("[remote/timer] Connection error shown to the user: {}", error));
+    if let Some(stop) = REMOTE_CLIENT_STOP.as_ref() {
+        stop.store(true, Ordering::Relaxed);
+    }
+    let wide = |t: String| -> Vec<u16> { t.encode_utf16().chain(std::iter::once(0)).collect() };
+    let text = wide(crate::lang::translate(error.to_string()));
+    let title = wide(crate::lang::translate("Connection Error".to_string()));
+    let hwnd = REMOTE_HWND as usize;
+    thread::spawn(move || {
+        const MB_ICONERROR: u32 = 0x10;
+        const MB_SETFOREGROUND: u32 = 0x10000;
+        unsafe {
+            MessageBoxW(hwnd as *mut std::ffi::c_void, text.as_ptr(), title.as_ptr(), MB_ICONERROR | MB_SETFOREGROUND);
+            PostMessageA(hwnd as *mut std::ffi::c_void, WM_CLOSE, 0, 0);
+        }
+    });
 }
 
 pub fn open_peer_stream(
@@ -435,9 +464,11 @@ unsafe extern "system" fn remote_timer_callback(
                 }
             }
 
-            if (status == "error" && !PASSWORD_DIALOG_SHOWN && TICK_COUNT > 90)
-                || (status == "closed" && TICK_COUNT > 30)
-            {
+            if status == "error" && !PASSWORD_DIALOG_SHOWN {
+                show_error_then_close(&error);
+                return;
+            }
+            if status == "closed" && TICK_COUNT > 30 {
                 crate::config::write_log(&format!("[remote/timer] FT connection ended ({}), closing window", status));
                 close_remote_window();
                 return;
@@ -512,12 +543,16 @@ unsafe extern "system" fn remote_timer_callback(
             if let Some(ref target) = CONNECT_TARGET_ID {
                 let exe = std::env::current_exe().unwrap_or_default();
                 crate::config::write_log(&format!("[remote] Opening FT window for {}", target));
-                let _ = std::process::Command::new(&exe)
+                let mut child = std::process::Command::new(&exe);
+                child
                     .args(["--connect", target, "--file-transfer"])
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn();
+                    .stderr(std::process::Stdio::null());
+                if let Some(pw) = UNSAVED_SESSION_PASSWORD.as_ref() {
+                    child.env(ENV_PEER_PASSWORD, pw);
+                }
+                let _ = child.spawn();
             }
         }
     }
@@ -531,9 +566,7 @@ unsafe extern "system" fn remote_timer_callback(
                 let w = cs.frame_width;
                 let h = cs.frame_height;
                 if w > 0 && h > 0 && !cs.frame_data.is_empty() {
-                    let desktop = std::env::var("USERPROFILE")
-                        .unwrap_or_else(|_| "C:\\".to_string());
-                    let desktop = format!("{}\\Desktop", desktop);
+                    let desktop = desktop_folder();
                     let timestamp = {
                         use std::time::{SystemTime, UNIX_EPOCH};
                         SystemTime::now()
@@ -671,7 +704,11 @@ unsafe extern "system" fn remote_timer_callback(
         }
     }
 
-    if status == "closed" || (status == "error" && TICK_COUNT > 30 && !PASSWORD_DIALOG_SHOWN) {
+    if status == "error" && !PASSWORD_DIALOG_SHOWN {
+        show_error_then_close(&error);
+    }
+
+    if status == "closed" {
         crate::config::write_log(&format!("[remote/timer] Connection ended ({}), closing window", status));
         close_remote_window();
         return;
@@ -739,11 +776,9 @@ unsafe extern "system" fn remote_timer_callback(
             } else { Vec::new() }
         };
         for (sender, text) in &messages {
-            let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-            let sender_escaped = sender.replace('&', "&amp;").replace('<', "&lt;");
             let _ = root.call_method("chatReceived", &[
-                sciter::Value::from(sender_escaped.as_str()),
-                sciter::Value::from(escaped.as_str()),
+                sciter::Value::from(sender.as_str()),
+                sciter::Value::from(text.as_str()),
             ]);
         }
     }
@@ -850,6 +885,7 @@ unsafe fn retry_connection_with_password(password: &str) {
     };
     let is_ft = IS_FILE_TRANSFER_MODE;
     let pw = password.to_string();
+    UNSAVED_SESSION_PASSWORD = if client::remember_password() { None } else { Some(pw.clone()) };
 
     let client_state = Arc::new(Mutex::new(client::ClientState::default()));
     let client_stop = Arc::new(AtomicBool::new(false));
@@ -1051,6 +1087,7 @@ unsafe fn process_file_responses(
             Some(message_proto::file_response::Union::Block(block)) => {
 
                 let jobs = FT_JOBS.as_mut().unwrap();
+                let mut refused_overwrite = false;
                 if let Some(job) = jobs.get_mut(&block.id) {
                     job.file_num = block.file_num;
                     let fnum = block.file_num as usize;
@@ -1067,29 +1104,50 @@ unsafe fn process_file_responses(
                     }
                     let offset = job.offsets[fnum];
 
-                    let decoded = if block.compressed {
-                        crate::file_transfer::zstd_decompress(&block.data)
+                    if offset == 0
+                        && job.confirmed_file != Some(block.file_num)
+                        && std::path::Path::new(&write_path).symlink_metadata().is_ok()
+                    {
+                        crate::config::write_log(&format!("[remote/ft] Refusing block for '{}': overwrite was not confirmed", write_path));
+                        refused_overwrite = true;
                     } else {
-                        block.data.to_vec()
-                    };
-                    match crate::file_transfer::write_file_block(&write_path, &decoded, offset) {
-                        Ok(()) => {
-                            job.offsets[fnum] += decoded.len() as u64;
+                        let decoded = if block.compressed {
+                            crate::file_transfer::zstd_decompress(&block.data)
+                        } else {
+                            block.data.to_vec()
+                        };
+                        match crate::file_transfer::write_file_block(&write_path, &decoded, offset) {
+                            Ok(()) => {
+                                job.offsets[fnum] += decoded.len() as u64;
 
-                            let total_finished: u64 = job.offsets.iter().sum();
-                            let _ = root.call_method("jobProgress", &[
-                                sciter::Value::from(block.id),
-                                sciter::Value::from(block.file_num),
-                                sciter::Value::from(0i32),
-                                sciter::Value::from(total_finished as i32),
-                            ]);
-                        }
-                        Err(e) => {
-                            crate::config::write_log(&format!("[remote/ft] write_file_block error: path='{}' err={}", write_path, e));
+                                let total_finished: u64 = job.offsets.iter().sum();
+                                let _ = root.call_method("jobProgress", &[
+                                    sciter::Value::from(block.id),
+                                    sciter::Value::from(block.file_num),
+                                    sciter::Value::from(0i32),
+                                    sciter::Value::from(total_finished as i32),
+                                ]);
+                            }
+                            Err(e) => {
+                                crate::config::write_log(&format!("[remote/ft] write_file_block error: path='{}' err={}", write_path, e));
+                            }
                         }
                     }
                 } else {
                     crate::config::write_log(&format!("[remote/ft] Block for unknown job id={}", block.id));
+                }
+                if refused_overwrite {
+                    jobs.remove(&block.id);
+                    let mut cancel = message_proto::FileTransferCancel::new();
+                    cancel.id = block.id;
+                    let mut fa = message_proto::FileAction::new();
+                    fa.set_cancel(cancel);
+                    client::send_file_action(client_state, fa);
+                    let _ = root.call_method("jobError", &[
+                        sciter::Value::from(block.id),
+                        sciter::Value::from("Overwrite was not confirmed"),
+                        sciter::Value::from(block.file_num),
+                    ]);
                 }
             }
             Some(message_proto::file_response::Union::Done(done)) => {
@@ -1135,6 +1193,9 @@ unsafe fn process_file_responses(
                     }
                 });
                 if !digest.is_upload && local_path.as_deref().map_or(false, |p| !std::path::Path::new(p).exists()) {
+                    if let Some(job) = FT_JOBS.as_mut().and_then(|j| j.get_mut(&digest.id)) {
+                        job.confirmed_file = Some(digest.file_num);
+                    }
                     let mut sc = message_proto::FileTransferSendConfirmRequest::new();
                     sc.id = digest.id;
                     sc.file_num = digest.file_num;
@@ -1234,6 +1295,7 @@ unsafe fn poll_ft_flags(
                         total_size: 0,
                         file_num: 0,
                         done_count: 0,
+                        confirmed_file: None,
                     });
                     let mut send_req = crate::protocol::message_proto::FileTransferSendRequest::new();
                     send_req.id = id;
@@ -1523,6 +1585,9 @@ unsafe fn poll_ft_flags(
                     sc.set_skip(true);
                 } else {
                     sc.set_offset_blk(offset as u32);
+                    if let Some(job) = FT_JOBS.as_mut().and_then(|j| j.get_mut(&id)) {
+                        job.confirmed_file = Some(file_num);
+                    }
                 }
                 let mut fa = crate::protocol::message_proto::FileAction::new();
                 fa.set_send_confirm(sc);
@@ -1717,6 +1782,25 @@ fn handle_key_input(text: &str, client_state: &Arc<Mutex<client::ClientState>>) 
     let shift = parts.get(4).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0) != 0;
 
     client::send_key_event(client_state, down, vk_code, alt, ctrl, shift);
+}
+
+fn desktop_folder() -> String {
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SHGetFolderPathW(hwnd: *mut std::ffi::c_void, csidl: i32, token: *mut std::ffi::c_void, flags: u32, path: *mut u16) -> i32;
+    }
+    const CSIDL_DESKTOPDIRECTORY: i32 = 0x0010;
+    let mut buf = [0u16; 260];
+    let found = unsafe { SHGetFolderPathW(std::ptr::null_mut(), CSIDL_DESKTOPDIRECTORY, std::ptr::null_mut(), 0, buf.as_mut_ptr()) } == 0;
+    let path = if found {
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        String::from_utf16_lossy(&buf[..len])
+    } else {
+        let profile = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
+        format!("{}\\Desktop", profile)
+    };
+    let _ = std::fs::create_dir_all(&path);
+    path
 }
 
 fn save_frame_as_bmp(path: &str, width: i32, height: i32, bgra_data: &[u8]) -> std::io::Result<()> {

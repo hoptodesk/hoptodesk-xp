@@ -135,6 +135,87 @@ impl MainHandler {
         false
     }
 
+    fn get_file_size(&self, path: String) -> String {
+        let path = crate::dashboard::percent_decode_path(&path);
+        std::fs::metadata(&path)
+            .map(|m| m.len().to_string())
+            .unwrap_or_else(|_| "0".to_string())
+    }
+
+    fn submit_ticket(&self, email: String, subject: String, description: String, priority: String) -> String {
+        match crate::dashboard::submit_ticket(&email, &subject, &description, &priority) {
+            Ok(ticket_id) => serde_json::json!({ "ticket_id": ticket_id }).to_string(),
+            Err(e) => {
+                crate::config::write_log(&format!("[handler] submit_ticket failed: {}", e));
+                serde_json::json!({ "error": e }).to_string()
+            }
+        }
+    }
+
+    fn upload_attachment(&self, ticket_id: String, path: String) -> String {
+        let ticket_id = ticket_id.trim().parse::<i64>().unwrap_or(0);
+        match crate::dashboard::upload_attachment(ticket_id, &path) {
+            Ok(()) => serde_json::json!({ "success": true }).to_string(),
+            Err(e) => serde_json::json!({ "success": false, "error": e }).to_string(),
+        }
+    }
+
+    fn get_ticket_reply_counter(&self) -> String {
+        crate::dashboard::get_ticket_reply_counter().to_string()
+    }
+
+    fn get_conversation(&self, ticket_id: String) -> String {
+        let ticket_id = ticket_id.trim().parse::<i64>().unwrap_or(0);
+        match crate::dashboard::get_conversation(ticket_id) {
+            Ok(messages) => messages.to_string(),
+            Err(e) => {
+                crate::config::write_log(&format!("[handler] get_conversation failed: {}", e));
+                "[]".to_string()
+            }
+        }
+    }
+
+    fn get_attachments(&self, ticket_id: String) -> String {
+        let ticket_id = ticket_id.trim().parse::<i64>().unwrap_or(0);
+        match crate::dashboard::get_attachments(ticket_id) {
+            Ok(mut attachments) => {
+                if let Some(items) = attachments.as_array_mut() {
+                    for item in items.iter_mut() {
+                        let url = item["download_url"].as_str().unwrap_or("").to_string();
+                        if !url.is_empty() {
+                            item["download_url"] = serde_json::Value::String(
+                                crate::dashboard::get_attachment_download_url(&url),
+                            );
+                        }
+                    }
+                }
+                attachments.to_string()
+            }
+            Err(e) => {
+                crate::config::write_log(&format!("[handler] get_attachments failed: {}", e));
+                "[]".to_string()
+            }
+        }
+    }
+
+    fn add_reply(&self, ticket_id: String, text: String) -> String {
+        let ticket_id = ticket_id.trim().parse::<i64>().unwrap_or(0);
+        match crate::dashboard::add_reply(ticket_id, &text) {
+            Ok(()) => serde_json::json!({ "success": true }).to_string(),
+            Err(e) => serde_json::json!({ "success": false, "error": e }).to_string(),
+        }
+    }
+
+    fn get_my_tickets(&self) -> String {
+        match crate::dashboard::get_my_tickets() {
+            Ok(tickets) => tickets.to_string(),
+            Err(e) => {
+                crate::config::write_log(&format!("[handler] get_my_tickets failed: {}", e));
+                "[]".to_string()
+            }
+        }
+    }
+
     fn install_me(&self, args: String, install_path: String) {
         crate::config::write_log(&format!(
             "[handler] install_me invoked args='{}' path='{}'",
@@ -300,6 +381,14 @@ impl sciter::EventHandler for MainHandler {
         fn is_installed_daemon(bool);
         fn install_me(String, String);
         fn goto_install();
+        fn get_file_size(String);
+        fn submit_ticket(String, String, String, String);
+        fn upload_attachment(String, String);
+        fn get_ticket_reply_counter();
+        fn get_conversation(String);
+        fn get_attachments(String);
+        fn add_reply(String, String);
+        fn get_my_tickets();
     }
 }
 
@@ -516,9 +605,17 @@ fn main() {
 
                 let peer_cfg = config::PeerConfig::load(&target_id);
                 let saved_password = peer_cfg.get_option("password");
-                crate::config::write_log(&format!("[connect] Starting connection to {} (file_transfer={}, has_saved_pw={}, switch={})",
-                    target_id, is_ft, !saved_password.is_empty(), switch_uuid.is_some()));
-                remote::run_connect_process_ex(&target_id, &saved_password, is_ft, switch_uuid.as_deref());
+                let handed_password = std::env::var(remote::ENV_PEER_PASSWORD).unwrap_or_default();
+                std::env::remove_var(remote::ENV_PEER_PASSWORD);
+                crate::config::write_log(&format!("[connect] Starting connection to {} (file_transfer={}, has_saved_pw={}, handed_pw={}, switch={})",
+                    target_id, is_ft, !saved_password.is_empty(), !handed_password.is_empty(), switch_uuid.is_some()));
+                let password = if handed_password.is_empty() {
+                    saved_password
+                } else {
+                    client::set_remember_password(false);
+                    handed_password
+                };
+                remote::run_connect_process_ex(&target_id, &password, is_ft, switch_uuid.as_deref());
                 std::process::exit(0);
             }
             "--invite" if args.len() >= 3 => {
@@ -714,6 +811,7 @@ fn run_ticket_window() {
     sciter::set_options(sciter::RuntimeOptions::GfxLayer(sciter::GFX_LAYER::CPU)).ok();
     let mut frame = sciter::Window::new();
     let html = include_str!("ui/ticket.html");
+    frame.event_handler(MainHandler);
     frame.register_resources(&ui_shared_resources());
     frame.load_html(html.as_bytes(), Some("this://app/ticket.html"));
     frame.set_title("HopToDesk - Tickets");

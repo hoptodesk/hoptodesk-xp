@@ -1282,11 +1282,27 @@ impl NativeObj for ElementNative {
                     let e = self.engine.borrow();
                     e.last_rects.get(&self.key).copied().unwrap_or((0.0, 0.0, 0.0, 0.0))
                 };
-                let (mut x, mut y, w, h) = rect;
+                let (mut x, mut y, mut w, mut h) = rect;
                 let what = match argv.first() {
                     Some(SV::Symbol(s)) => s.to_string(),
                     _ => "rectw".to_string(),
                 };
+                if argv.iter().skip(1).any(|a| matches!(a, SV::Symbol(s) if s.as_ref() == "content")) {
+                    let styles = cached_computed_styles(&self.engine);
+                    let pad = |i: usize| match styles.get(&self.key).map(|c| c.padding[i]) {
+                        Some(crate::engine::style::Length::Px(v)) => v,
+                        _ => 0.0,
+                    };
+                    let e = self.engine.borrow();
+                    let (right, bottom) = e
+                        .doc
+                        .descendants(self.key)
+                        .into_iter()
+                        .filter_map(|d| e.last_rects.get(&d))
+                        .fold((x, y), |(r, b), d| (r.max(d.0 + d.2), b.max(d.1 + d.3)));
+                    w = w.max(right + pad(1) - x);
+                    h = h.max(bottom + pad(2) - y);
+                }
                 // Third arg = coordinate space: #view (default, layout coords),
                 // #parent (relative to the parent box), #screen (desktop coords).
                 let coords = argv
@@ -3572,9 +3588,26 @@ pub fn cursor_at(engine: &EngineRef, hit: Option<NodeKey>) -> crate::engine::sty
                 return *c;
             }
         }
+        if e.doc.arena.get(k).map_or(false, takes_typed_text) {
+            return Cursor::Text;
+        }
         cur = e.doc.arena.get(k).and_then(|n| n.parent);
     }
     Cursor::Default
+}
+
+fn takes_typed_text(n: &crate::engine::dom::Node) -> bool {
+    if n.attr("disabled").is_some() {
+        return false;
+    }
+    match n.tag.as_str() {
+        "textarea" => true,
+        "input" => matches!(
+            n.attr("type").unwrap_or("text"),
+            "text" | "password" | "number" | "search" | "email" | "url" | "tel"
+        ),
+        _ => false,
+    }
 }
 
 /// A mounted Reactor component IS its root element in Sciter, so `comp.value` /

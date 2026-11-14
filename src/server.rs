@@ -951,7 +951,7 @@ fn run_video_input_loop(
             release_mouse_owner(self.session_id);
             input::release_all_held_keys();
             crate::privacy::turn_off();
-            platform::block_input(false);
+            input::block_input(false);
             if self.lock_after_end.get() {
                 crate::config::write_log("[server] Locking the screen after session end");
                 platform::lock_screen();
@@ -1137,7 +1137,7 @@ fn run_video_input_loop(
                                     let _ = stream.send_msg(&reply.write_to_bytes().unwrap_or_default());
                                 }
                                 if let Some(on) = option_yes(opt.block_input) {
-                                    let ok = platform::block_input(on);
+                                    let ok = input::block_input(on);
                                     crate::config::write_log(&format!(
                                         "[server] Block user input {} requested by peer -> {}",
                                         if on { "on" } else { "off" },
@@ -1975,6 +1975,20 @@ fn run_port_forward_loop(
     Ok(())
 }
 
+fn file_transfer_allowed() -> bool {
+    crate::config::Config2::load().get_option("enable-file-transfer") != "N"
+}
+
+fn close_file_transfer_denied(stream: &mut FramedStream) {
+    crate::config::write_log("[server/ft] File transfer permission removed, closing the session");
+    let mut misc = message_proto::Misc::new();
+    misc.set_close_reason("No permission of file transfer".to_string());
+    let mut msg = message_proto::Message::new();
+    msg.set_misc(misc);
+    let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
+    std::thread::sleep(Duration::from_millis(150));
+}
+
 fn run_file_transfer_loop(
     stream: &mut FramedStream,
     stop: &Arc<AtomicBool>,
@@ -2005,6 +2019,10 @@ fn run_file_transfer_loop(
             if cm_disconnect_requested() {
                 crate::config::write_log("[server/ft] CM user disconnected session");
                 send_session_close(stream);
+                break;
+            }
+            if !file_transfer_allowed() {
+                close_file_transfer_denied(stream);
                 break;
             }
         }

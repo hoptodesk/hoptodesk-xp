@@ -125,7 +125,7 @@ svg#settings-gear:hover, svg#settings-gear:focus {
     border-radius: 12px;
     padding: 3px 12px 3px 9px;
     cursor: pointer;
-    font-size: 0.65em;
+    font-size: 0.75em;
     color: #1565C0;
     font-weight: 700;
     margin-left: 8px;
@@ -151,7 +151,7 @@ svg#settings-gear:hover, svg#settings-gear:focus {
     border-radius: 12px;
     padding: 3px 12px 3px 9px;
     cursor: pointer;
-    font-size: 0.65em;
+    font-size: 0.75em;
     color: #2C8CFF;
     font-weight: 700;
 }
@@ -278,7 +278,7 @@ svg#settings-gear:hover, svg#settings-gear:focus {
     border-radius: 12px;
     padding: 3px 10px 3px 7px;
     cursor: pointer;
-    font-size: 0.65em;
+    font-size: 0.75em;
     color: #1565C0;
     font-weight: 700;
     margin-left: 6px;

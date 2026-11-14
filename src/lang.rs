@@ -110,7 +110,7 @@ fn get_system_locale() -> String {
     let sub = (lang_id >> 10) & 0x3F;
     match primary {
         0x04 => {
-            if sub == 0x01 { "zh-cn" } else { "zh-tw" }
+            if sub == 0x02 || sub == 0x04 { "zh-cn" } else { "zh-tw" }
         }
         0x09 => "en",
         0x0C => "fr",
