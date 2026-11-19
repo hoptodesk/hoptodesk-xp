@@ -126,6 +126,10 @@ impl FramedStream {
         self.encrypt = Some(Encrypt::new(key));
     }
 
+    pub fn is_encrypted(&self) -> bool {
+        self.encrypt.is_some()
+    }
+
     pub fn set_max_frame_len(&mut self, max_len: usize) {
         self.max_frame_len = max_len;
     }

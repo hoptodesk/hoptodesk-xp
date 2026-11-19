@@ -406,6 +406,18 @@ view.windowMinSize = (300, 450);
             return false;
         };
 
+        var permKeyboard = "";
+        var permClipboard = "";
+        var permAudio = "";
+
+        function permChanges() {
+            var out = "";
+            if (permKeyboard != "") out += "keyboard|" + permKeyboard + ";";
+            if (permClipboard != "") out += "clipboard|" + permClipboard + ";";
+            if (permAudio != "") out += "audio|" + permAudio + ";";
+            return out;
+        }
+
         function togglePerm(el, name) {
             var isDisabled = el.attributes.hasClass("disabled");
             if (isDisabled) {
@@ -414,14 +426,15 @@ view.windowMinSize = (300, 450);
                 el.attributes.addClass("disabled");
             }
             var enabled = isDisabled ? "1" : "0";
-            $(#perm-flag).text = name + "|" + enabled;
+            if (name == "keyboard") permKeyboard = enabled;
+            else if (name == "clipboard") permClipboard = enabled;
+            else if (name == "audio") permAudio = enabled;
+            $(#perm-flag).text = permChanges();
         }
 
-        event click $(#perm-keyboard) { togglePerm(this, "keyboard"); }
-        event click $(#perm-clipboard) { togglePerm(this, "clipboard"); }
-        event click $(#perm-audio) { togglePerm(this, "audio"); }
-        event click $(#perm-file) { togglePerm(this, "file"); }
-        event click $(#perm-restart) { togglePerm(this, "restart"); }
+        event click $(#perm-keyboard) { togglePerm($(#perm-keyboard), "keyboard"); }
+        event click $(#perm-clipboard) { togglePerm($(#perm-clipboard), "clipboard"); }
+        event click $(#perm-audio) { togglePerm($(#perm-audio), "audio"); }
 
         if ($(#invite-mode).text == "true") {
             $(#cm-status).text = $(#invite-text).text;

@@ -9,16 +9,104 @@ use std::time::{Duration, Instant};
 
 const DASHBOARD_API_URL: &str = "https://dashboard.hoptodesk.com/api";
 const DASHBOARD_WS_HOST: &str = "dashboard.hoptodesk.com";
+const DASHBOARD_WS_PATH: &str = "/socket.io/";
+const DEVICE_KEY_ERROR_CODES: [&str; 2] = ["device_key_invalid", "device_key_required"];
+const LINK_POLL_SECS: u64 = 10;
+const LINK_RETRY_MAX_SECS: u64 = 300;
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 const RECONNECT_DELAY_BASE_SECS: u64 = 1;
 const RECONNECT_DELAY_MAX_SECS: u64 = 10;
 const WS_READ_TIMEOUT_SECS: u64 = 90;
+const WS_LOOP_TICK_MS: u64 = 1000;
+const MAX_PENDING_SESSION_EVENTS: usize = 64;
+
+#[derive(Clone)]
+struct SessionMeta {
+    session_type: String,
+    remote_ip: String,
+    peer_name: String,
+}
+
+struct SessionEvent {
+    started: bool,
+    meta: SessionMeta,
+    timestamp: u64,
+}
+
+struct HostSessions {
+    active: usize,
+    meta: SessionMeta,
+    pending: Vec<SessionEvent>,
+}
 
 static DASHBOARD_RUNNING: AtomicBool = AtomicBool::new(false);
-static IN_SESSION: AtomicBool = AtomicBool::new(false);
-static SESSION_META: Mutex<(String, String)> = Mutex::new((String::new(), String::new()));
+static HOST_SESSIONS: Mutex<HostSessions> = Mutex::new(HostSessions {
+    active: 0,
+    meta: SessionMeta {
+        session_type: String::new(),
+        remote_ip: String::new(),
+        peer_name: String::new(),
+    },
+    pending: Vec::new(),
+});
 static TICKET_REPLY_COUNTER: AtomicU64 = AtomicU64::new(0);
 static LINKING_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static LINK_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn api_base() -> String {
+    let url = Config2::load().get_option("dashboard-api-url");
+    if url.is_empty() {
+        DASHBOARD_API_URL.to_string()
+    } else {
+        url
+    }
+}
+
+fn ws_endpoint() -> (String, u16, String) {
+    parse_wss_url(&Config2::load().get_option("dashboard-ws-url")).unwrap_or_else(|| {
+        (DASHBOARD_WS_HOST.to_string(), 443, DASHBOARD_WS_PATH.to_string())
+    })
+}
+
+fn parse_wss_url(url: &str) -> Option<(String, u16, String)> {
+    let rest = url.strip_prefix("wss://")?;
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "/"),
+    };
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, port.parse().ok()?),
+        None => (authority, 443),
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some((host.to_string(), port, path.to_string()))
+}
+
+fn apply_region_from_response(resp: &serde_json::Value) {
+    let region = &resp["dashboard_region"];
+    if let (Some(api), Some(ws)) = (region["api"].as_str(), region["ws"].as_str()) {
+        if api.starts_with("https://") && parse_wss_url(ws).is_some() {
+            let mut cfg2 = Config2::load();
+            if cfg2.get_option("dashboard-api-url") != api || cfg2.get_option("dashboard-ws-url") != ws {
+                cfg2.set_option("dashboard-api-url", api);
+                cfg2.set_option("dashboard-ws-url", ws);
+                cfg2.save();
+                config::write_log(&format!("[dashboard] Dashboard region set to {}", api));
+            }
+        }
+    }
+}
+
+fn forget_dashboard_link(reason: &str) {
+    config::write_log(&format!("[dashboard] {}, unlinking", reason));
+    let mut cfg2 = Config2::load();
+    cfg2.set_option("dashboard_user_id", "");
+    cfg2.set_option("invite_code", "");
+    cfg2.set_option("dashboard-device-key", "");
+    cfg2.save();
+}
 
 pub fn is_linked() -> bool {
     let cfg = Config2::load();
@@ -64,7 +152,7 @@ fn store_device_key(value: &serde_json::Value) {
 pub fn validate_invite(invite_code: &str) -> Result<(String, String, String, String), String> {
     let url = format!(
         "{}?action=validateInvite&invite_code={}",
-        DASHBOARD_API_URL, invite_code
+        api_base(), invite_code
     );
     let body = wininet::http_get(&url)?;
     let resp: serde_json::Value =
@@ -72,6 +160,7 @@ pub fn validate_invite(invite_code: &str) -> Result<(String, String, String, Str
     if resp["success"].as_bool() != Some(true) {
         return Err(format!("validateInvite failed: {}", resp));
     }
+    apply_region_from_response(&resp);
     let invite = &resp["invite"];
     let enrollment_token = invite["enrollment_token"]
         .as_str()
@@ -96,10 +185,6 @@ pub fn validate_invite(invite_code: &str) -> Result<(String, String, String, Str
 }
 
 pub fn get_share_invite() -> Result<String, String> {
-    let cached = Config2::load().get_option("share_invite_code");
-    if !cached.is_empty() {
-        return Ok(cached);
-    }
     let dashboard_user_id = get_dashboard_user_id();
     if dashboard_user_id.is_empty() {
         return Err("Not linked to a dashboard".to_string());
@@ -108,14 +193,16 @@ pub fn get_share_invite() -> Result<String, String> {
     if device_id.is_empty() {
         return Err("Device ID not available".to_string());
     }
-    let url = format!("{}?action=getShareInvite", DASHBOARD_API_URL);
-    let body = wininet::http_post_form(
-        &url,
-        &[
-            ("device_id", &device_id),
-            ("dashboard_user_id", &dashboard_user_id),
-        ],
-    )?;
+    let url = format!("{}?action=getShareInvite", api_base());
+    let device_key = get_device_key();
+    let mut params: Vec<(&str, &str)> = vec![
+        ("device_id", &device_id),
+        ("dashboard_user_id", &dashboard_user_id),
+    ];
+    if !device_key.is_empty() {
+        params.push(("device_key", &device_key));
+    }
+    let body = wininet::http_post_form(&url, &params)?;
     let resp: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
     if resp["success"].as_bool() != Some(true) {
@@ -125,9 +212,6 @@ pub fn get_share_invite() -> Result<String, String> {
     if code.is_empty() {
         return Err("getShareInvite returned empty code".to_string());
     }
-    let mut cfg2 = Config2::load();
-    cfg2.set_option("share_invite_code", &code);
-    cfg2.save();
     Ok(code)
 }
 
@@ -139,7 +223,7 @@ pub fn register_device(
     os_name: &str,
     mac: &str,
 ) -> Result<String, String> {
-    let url = format!("{}?action=registerDevice", DASHBOARD_API_URL);
+    let url = format!("{}?action=registerDevice", api_base());
     let device_key = get_device_key();
     let mut params: Vec<(&str, &str)> = vec![
         ("device_id", device_id),
@@ -161,6 +245,7 @@ pub fn register_device(
     let body = wininet::http_post_form(&url, &params)?;
     let resp: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
+    apply_region_from_response(&resp);
     if resp["success"].as_bool() != Some(true) {
         return Err(format!("registerDevice failed: {}", resp));
     }
@@ -186,7 +271,7 @@ pub fn register_device(
 pub fn get_network_settings(invite_code: &str) -> Result<(), String> {
     let url = format!(
         "{}?action=getNetworkSettingsByInvite&invite_code={}",
-        DASHBOARD_API_URL, invite_code
+        api_base(), invite_code
     );
     let body = wininet::http_get(&url)?;
     let resp: serde_json::Value =
@@ -226,26 +311,29 @@ pub fn get_network_settings(invite_code: &str) -> Result<(), String> {
 }
 
 pub fn link_device() -> Result<(), String> {
+    link_with_code(&get_invite_code())
+}
+
+pub fn link_with_code(invite_code: &str) -> Result<(), String> {
+    if invite_code.is_empty() {
+        return Err("No invite code set".to_string());
+    }
     if LINKING_IN_PROGRESS.swap(true, Ordering::SeqCst) {
         return Err("Linking already in progress".to_string());
     }
-    let result = link_device_inner();
+    let result = link_device_inner(invite_code);
     LINKING_IN_PROGRESS.store(false, Ordering::SeqCst);
     result
 }
 
-fn link_device_inner() -> Result<(), String> {
-    let invite_code = get_invite_code();
-    if invite_code.is_empty() {
-        return Err("No invite code set".to_string());
-    }
+fn link_device_inner(invite_code: &str) -> Result<(), String> {
 
     config::write_log(&format!(
         "[dashboard] Linking device with invite code: {}...",
         &invite_code[..invite_code.len().min(8)]
     ));
 
-    let (enrollment_token, dashboard_user_id, _invite_type, account_name) = validate_invite(&invite_code)?;
+    let (enrollment_token, dashboard_user_id, _invite_type, account_name) = validate_invite(invite_code)?;
     if !account_name.is_empty() {
         let mut cfg2 = Config2::load();
         cfg2.set_option("dashboard_account_name", &account_name);
@@ -264,7 +352,7 @@ fn link_device_inner() -> Result<(), String> {
 
     let resolved_user_id = register_device(
         &enrollment_token,
-        &invite_code,
+        invite_code,
         &device_id,
         &device_name,
         os_name,
@@ -281,14 +369,16 @@ fn link_device_inner() -> Result<(), String> {
         let mut cfg2 = Config2::load();
         cfg2.set_option("dashboard_user_id", &final_user_id);
         cfg2.set_option("dashboard_device_id", &device_id);
+        cfg2.set_option("last_enrolled_invite_code", invite_code);
         cfg2.save();
+        LINK_GENERATION.fetch_add(1, Ordering::SeqCst);
         config::write_log(&format!(
             "[dashboard] Dashboard user ID stored: {}",
             final_user_id
         ));
     }
 
-    if let Err(e) = get_network_settings(&invite_code) {
+    if let Err(e) = get_network_settings(invite_code) {
         config::write_log(&format!(
             "[dashboard] Failed to get network settings: {}",
             e
@@ -417,13 +507,22 @@ fn handle_incoming_message(text: &str) -> Result<Option<(String, serde_json::Val
                         }
                     }
                     "heartbeat_ack" => {}
+                    "error" => {
+                        if let Some(data) = arr.get(1) {
+                            let code = data["code"].as_str().unwrap_or("");
+                            config::write_log(&format!("[dashboard] Server error event '{}'", code));
+                            if code == "unknown_account" && data["dashboard_region"].is_object() {
+                                apply_region_from_response(data);
+                                return Err("Dashboard region changed".to_string());
+                            }
+                            if DEVICE_KEY_ERROR_CODES.contains(&code) {
+                                forget_dashboard_link(code);
+                                return Err(format!("Device key rejected: {}", code));
+                            }
+                        }
+                    }
                     "unlinked" => {
-                        config::write_log("[dashboard] Device has been permanently deleted, unlinking");
-                        let mut cfg2 = Config2::load();
-                        cfg2.set_option("dashboard_user_id", "");
-                        cfg2.set_option("invite_code", "");
-                        cfg2.set_option("dashboard-device-key", "");
-                        cfg2.save();
+                        forget_dashboard_link("Device has been permanently deleted");
                         return Err("Device unlinked from dashboard".to_string());
                     }
                     "ticket:reply" => {
@@ -465,14 +564,16 @@ fn handle_incoming_message(text: &str) -> Result<Option<(String, serde_json::Val
     Ok(None)
 }
 
-fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
+fn dashboard_ws_loop(dashboard_user_id: &str, link_attempts: &mut LinkAttempts) -> Result<(), String> {
+    let link_generation = LINK_GENERATION.load(Ordering::SeqCst);
+    let (ws_host, ws_port, ws_path) = ws_endpoint();
     let path = format!(
-        "/socket.io/?dashboard_user_id={}&EIO=4&transport=websocket",
-        dashboard_user_id
+        "{}?dashboard_user_id={}&EIO=4&transport=websocket",
+        ws_path, dashboard_user_id
     );
-    config::write_log("[dashboard] Connecting to dashboard WebSocket");
+    config::write_log(&format!("[dashboard] Connecting to dashboard WebSocket at {}", ws_host));
 
-    let mut ws = WssClient::connect(DASHBOARD_WS_HOST, 443, &path)
+    let mut ws = WssClient::connect(&ws_host, ws_port, &path)
         .map_err(|e| format!("WSS connect failed: {}", e))?;
 
     let open_msg = ws.recv_text().map_err(|e| format!("WS read open: {}", e))?;
@@ -504,7 +605,9 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
         "computer_name": computer_name,
         "os": "windows",
         "mac_address": mac,
-        "wol_enabled": wol_enabled
+        "wol_enabled": wol_enabled,
+        "two_fa": !Config2::load().get_option("2fa").is_empty(),
+        "access_lock_capable": false
     });
 
     std::thread::sleep(Duration::from_millis(500));
@@ -512,7 +615,7 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
 
     config::write_log("[dashboard] WebSocket connected and registered");
 
-    ws.set_read_timeout(Some(Duration::from_secs(HEARTBEAT_INTERVAL_SECS + 5)))
+    ws.set_read_timeout(Some(Duration::from_millis(WS_LOOP_TICK_MS)))
         .map_err(|e| format!("set_read_timeout: {}", e))?;
 
     let mut last_heartbeat = Instant::now();
@@ -521,6 +624,10 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
     let mut prev_cpu_times = crate::platform::get_cpu_times();
 
     loop {
+        if LINK_GENERATION.load(Ordering::SeqCst) != link_generation {
+            config::write_log("[dashboard] Dashboard link changed, reconnecting");
+            break;
+        }
 
         match ws.recv_text() {
             Ok(text) => {
@@ -556,36 +663,9 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
             }
         }
 
+        report_session_events(&mut ws, &device_id, &mut was_in_session)?;
+
         if last_heartbeat.elapsed() >= Duration::from_secs(HEARTBEAT_INTERVAL_SECS) {
-            let current_in_session = IN_SESSION.load(Ordering::Relaxed);
-
-            if current_in_session && !was_in_session {
-                let (stype, rip) = SESSION_META.lock().unwrap().clone();
-                let session_start = serde_json::json!({
-                    "device_id": device_id,
-                    "session_type": if stype.is_empty() { "screen".to_string() } else { stype },
-                    "remote_ip": rip,
-                    "timestamp": std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs()
-                });
-                send_socketio_event(&mut ws, "remote_session_start", &session_start)?;
-            } else if !current_in_session && was_in_session {
-                let (stype, rip) = SESSION_META.lock().unwrap().clone();
-                let session_end = serde_json::json!({
-                    "device_id": device_id,
-                    "session_type": if stype.is_empty() { "screen".to_string() } else { stype },
-                    "remote_ip": rip,
-                    "timestamp": std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs()
-                });
-                send_socketio_event(&mut ws, "remote_session_end", &session_end)?;
-            }
-            was_in_session = current_in_session;
-
             let wol_now = is_wol_enabled();
             let cur_cpu_times = crate::platform::get_cpu_times();
             let cpu_pct = match (prev_cpu_times, cur_cpu_times) {
@@ -604,7 +684,7 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
             let heartbeat = serde_json::json!({
                 "device_id": device_id,
                 "timezone": timezone,
-                "in_session": current_in_session,
+                "in_session": was_in_session,
                 "wol_enabled": wol_now,
                 "cpu_pct": cpu_pct,
                 "mem_pct": crate::platform::get_mem_pct(),
@@ -613,10 +693,50 @@ fn dashboard_ws_loop(dashboard_user_id: &str) -> Result<(), String> {
             });
             send_socketio_event(&mut ws, "heartbeat", &heartbeat)?;
             last_heartbeat = Instant::now();
+            link_attempts.try_pending_code();
         }
     }
 
     Ok(())
+}
+
+#[derive(Default)]
+struct LinkAttempts {
+    code: String,
+    failures: u32,
+    last: Option<Instant>,
+}
+
+impl LinkAttempts {
+    fn try_pending_code(&mut self) {
+        let code = get_invite_code();
+        if code.is_empty() {
+            return;
+        }
+        if is_linked() && code == Config2::load().get_option("last_enrolled_invite_code") {
+            return;
+        }
+        if code != self.code {
+            self.code = code.clone();
+            self.failures = 0;
+            self.last = None;
+        }
+        let wait = Duration::from_secs((LINK_POLL_SECS << self.failures.min(5)).min(LINK_RETRY_MAX_SECS));
+        if self.last.map_or(false, |at| at.elapsed() < wait) {
+            return;
+        }
+        self.last = Some(Instant::now());
+        match link_with_code(&code) {
+            Ok(()) => {
+                config::write_log("[dashboard] Device linked with the invite code");
+                *self = Self::default();
+            }
+            Err(e) => {
+                self.failures = self.failures.saturating_add(1);
+                config::write_log(&format!("[dashboard] Failed to link device: {}", e));
+            }
+        }
+    }
 }
 
 pub fn start() {
@@ -625,50 +745,26 @@ pub fn start() {
         return;
     }
 
-    if !get_invite_code().is_empty() {
-        match link_device() {
-            Ok(()) => config::write_log("[dashboard] Device linked successfully"),
-            Err(e) => {
-                config::write_log(&format!("[dashboard] Failed to link device: {}", e));
-                DASHBOARD_RUNNING.store(false, Ordering::SeqCst);
-                return;
-            }
-        }
-    }
-
-    let dashboard_user_id = get_dashboard_user_id();
-    if dashboard_user_id.is_empty() {
-        config::write_log("[dashboard] No dashboard_user_id, not starting WebSocket");
-
-        loop {
-            std::thread::sleep(Duration::from_secs(10));
-            let code = get_invite_code();
-            if !code.is_empty() && !is_linked() {
-                match link_device() {
-                    Ok(()) => {
-                        config::write_log("[dashboard] Device linked via UI code");
-                        break;
-                    }
-                    Err(e) => config::write_log(&format!(
-                        "[dashboard] Failed to link device via UI code: {}",
-                        e
-                    )),
-                }
-            }
-        }
-    }
-
-    let dashboard_user_id = get_dashboard_user_id();
-    if dashboard_user_id.is_empty() {
-        DASHBOARD_RUNNING.store(false, Ordering::SeqCst);
-        return;
-    }
-
-    config::write_log("[dashboard] Starting dashboard WebSocket connection");
+    let mut link_attempts = LinkAttempts::default();
     let mut reconnect_delay = RECONNECT_DELAY_BASE_SECS;
+    let mut waiting_logged = false;
 
     loop {
-        match dashboard_ws_loop(&dashboard_user_id) {
+        link_attempts.try_pending_code();
+
+        let dashboard_user_id = get_dashboard_user_id();
+        if dashboard_user_id.is_empty() {
+            if !waiting_logged {
+                config::write_log("[dashboard] Not linked to a dashboard");
+                waiting_logged = true;
+            }
+            reconnect_delay = RECONNECT_DELAY_BASE_SECS;
+            std::thread::sleep(Duration::from_secs(LINK_POLL_SECS));
+            continue;
+        }
+        waiting_logged = false;
+
+        match dashboard_ws_loop(&dashboard_user_id, &mut link_attempts) {
             Ok(()) => {
                 config::write_log("[dashboard] WebSocket loop ended normally");
                 reconnect_delay = RECONNECT_DELAY_BASE_SECS;
@@ -678,9 +774,8 @@ pub fn start() {
             }
         }
 
-        if get_dashboard_user_id().is_empty() {
-            config::write_log("[dashboard] Device unlinked, stopping reconnection");
-            break;
+        if !is_linked() {
+            continue;
         }
 
         config::write_log(&format!(
@@ -689,13 +784,6 @@ pub fn start() {
         ));
         std::thread::sleep(Duration::from_secs(reconnect_delay));
         reconnect_delay = (reconnect_delay * 2).min(RECONNECT_DELAY_MAX_SECS);
-
-        let code = get_invite_code();
-        if !code.is_empty() && !is_linked() {
-            if let Ok(()) = link_device() {
-                config::write_log("[dashboard] Device re-linked during reconnect");
-            }
-        }
     }
 }
 
@@ -761,7 +849,7 @@ pub fn submit_ticket(
     let device_name = hostname();
     let user_name = std::env::var("USERNAME").unwrap_or_default();
 
-    let url = format!("{}?action=submitTicket", DASHBOARD_API_URL);
+    let url = format!("{}?action=submitTicket", api_base());
     let body = wininet::http_post_form(
         &url,
         &[
@@ -790,7 +878,7 @@ pub fn get_my_tickets() -> Result<serde_json::Value, String> {
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();
     let dashboard_user_id = get_dashboard_user_id();
-    let url = format!("{}?action=getMyTickets", DASHBOARD_API_URL);
+    let url = format!("{}?action=getMyTickets", api_base());
     let body = wininet::http_post_form(
         &url,
         &[
@@ -813,7 +901,7 @@ pub fn get_my_tickets() -> Result<serde_json::Value, String> {
 pub fn get_conversation(ticket_id: i64) -> Result<serde_json::Value, String> {
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();
-    let url = format!("{}?action=getCustomerConversation", DASHBOARD_API_URL);
+    let url = format!("{}?action=getCustomerConversation", api_base());
     let body = wininet::http_post_form(
         &url,
         &[
@@ -836,7 +924,7 @@ pub fn get_conversation(ticket_id: i64) -> Result<serde_json::Value, String> {
 pub fn add_reply(ticket_id: i64, message: &str) -> Result<(), String> {
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();
-    let url = format!("{}?action=addCustomerReply", DASHBOARD_API_URL);
+    let url = format!("{}?action=addCustomerReply", api_base());
     let body = wininet::http_post_form(
         &url,
         &[
@@ -860,7 +948,7 @@ pub fn add_reply(ticket_id: i64, message: &str) -> Result<(), String> {
 pub fn get_attachments(ticket_id: i64) -> Result<serde_json::Value, String> {
     let cfg = config::Config::load();
     let device_id = cfg.id.clone();
-    let url = format!("{}?action=getAttachments", DASHBOARD_API_URL);
+    let url = format!("{}?action=getAttachments", api_base());
     let body = wininet::http_post_form(
         &url,
         &[
@@ -899,7 +987,7 @@ pub fn upload_attachment(ticket_id: i64, file_path: &str) -> Result<(), String> 
         file_content
     };
 
-    let url = format!("{}?action=customerUploadAttachment", DASHBOARD_API_URL);
+    let url = format!("{}?action=customerUploadAttachment", api_base());
     let body = wininet::http_post_multipart(
         &url,
         &[
@@ -933,20 +1021,106 @@ pub fn get_ticket_reply_counter() -> u64 {
     TICKET_REPLY_COUNTER.load(Ordering::Relaxed)
 }
 
-pub fn set_in_session(active: bool, session_type: &str, remote_ip: &str) {
+fn host_sessions() -> std::sync::MutexGuard<'static, HostSessions> {
+    HOST_SESSIONS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+pub fn set_in_session(active: bool, session_type: &str, remote_ip: &str, peer_name: &str) {
+    let report = DASHBOARD_RUNNING.load(Ordering::SeqCst) && is_linked();
+    let mut sessions = host_sessions();
     if active {
-        if let Ok(mut meta) = SESSION_META.lock() {
-            *meta = (session_type.to_string(), remote_ip.to_string());
+        sessions.active += 1;
+        if sessions.active > 1 {
+            return;
+        }
+        sessions.meta = SessionMeta {
+            session_type: session_type.to_string(),
+            remote_ip: remote_ip.to_string(),
+            peer_name: peer_name.chars().take(200).collect(),
+        };
+    } else {
+        if sessions.active == 0 {
+            return;
+        }
+        sessions.active -= 1;
+        if sessions.active > 0 {
+            return;
         }
     }
-    IN_SESSION.store(active, Ordering::Relaxed);
+    if report {
+        if sessions.pending.len() >= MAX_PENDING_SESSION_EVENTS {
+            sessions.pending.remove(0);
+        }
+        let meta = sessions.meta.clone();
+        sessions.pending.push(SessionEvent { started: active, meta, timestamp: unix_now() });
+    }
+}
+
+pub struct SessionGuard;
+
+impl SessionGuard {
+    pub fn start(session_type: &str, remote_ip: &str, peer_name: &str) -> Self {
+        set_in_session(true, session_type, remote_ip, peer_name);
+        SessionGuard
+    }
+}
+
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        set_in_session(false, "", "", "");
+    }
+}
+
+fn send_session_event(ws: &mut WssClient, device_id: &str, event: &SessionEvent) -> Result<(), String> {
+    let session_type = if event.meta.session_type.is_empty() { "screen" } else { event.meta.session_type.as_str() };
+    let mut payload = serde_json::json!({
+        "device_id": device_id,
+        "session_type": session_type,
+        "remote_ip": event.meta.remote_ip,
+        "timestamp": event.timestamp
+    });
+    if event.started && !event.meta.peer_name.is_empty() {
+        payload["peer_name"] = serde_json::json!(event.meta.peer_name);
+    }
+    let name = if event.started { "remote_session_start" } else { "remote_session_end" };
+    send_socketio_event(ws, name, &payload)
+}
+
+fn report_session_events(ws: &mut WssClient, device_id: &str, reported_active: &mut bool) -> Result<(), String> {
+    let mut events = {
+        let mut sessions = host_sessions();
+        let mut events = std::mem::take(&mut sessions.pending);
+        let active = sessions.active > 0;
+        if events.is_empty() && active != *reported_active {
+            events.push(SessionEvent { started: active, meta: sessions.meta.clone(), timestamp: unix_now() });
+        }
+        events
+    };
+    for i in 0..events.len() {
+        if let Err(e) = send_session_event(ws, device_id, &events[i]) {
+            let mut unsent = events.split_off(i);
+            let mut sessions = host_sessions();
+            unsent.append(&mut sessions.pending);
+            sessions.pending = unsent;
+            return Err(e);
+        }
+        *reported_active = events[i].started;
+    }
+    Ok(())
 }
 
 pub fn get_attachment_download_url(download_url: &str) -> String {
     if download_url.starts_with("http") {
         download_url.to_string()
     } else {
-        format!("{}/{}", DASHBOARD_API_URL, download_url)
+        format!("{}/{}", api_base(), download_url)
     }
 }
 
@@ -976,4 +1150,21 @@ pub fn send_wol_packet(mac_str: &str) {
 fn is_wol_enabled() -> bool {
     let cfg = Config2::load();
     cfg.get_option("enable-wol") == "Y"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_wss_url;
+
+    #[test]
+    fn parses_dashboard_socket_urls() {
+        let endpoint = |host: &str, port: u16, path: &str| Some((host.to_string(), port, path.to_string()));
+        assert_eq!(parse_wss_url("wss://dashboard.example.com/socket.io/"), endpoint("dashboard.example.com", 443, "/socket.io/"));
+        assert_eq!(parse_wss_url("wss://dashboard.example.com:8443/socket.io/"), endpoint("dashboard.example.com", 8443, "/socket.io/"));
+        assert_eq!(parse_wss_url("wss://dashboard.example.com"), endpoint("dashboard.example.com", 443, "/"));
+        assert_eq!(parse_wss_url("https://dashboard.example.com/socket.io/"), None);
+        assert_eq!(parse_wss_url("wss://:443/socket.io/"), None);
+        assert_eq!(parse_wss_url("wss://dashboard.example.com:port/"), None);
+        assert_eq!(parse_wss_url(""), None);
+    }
 }

@@ -281,6 +281,18 @@ pub fn run_session_public(
         }
     }
 
+    if !stream.is_encrypted() {
+        crate::config::write_log("[server] Refused: the connection is not encrypted");
+        let mut resp = message_proto::LoginResponse::new();
+        resp.union = Some(message_proto::login_response::Union::Error(
+            "Connection not secure".to_string(),
+        ));
+        let mut msg = message_proto::Message::new();
+        msg.set_login_response(resp);
+        stream.send_msg(&msg.write_to_bytes().map_err(io_err)?)?;
+        return Ok(());
+    }
+
     let salt = config_salt;
     let challenge = generate_random_string(6);
 
@@ -715,6 +727,14 @@ pub fn run_session_public(
 
     crate::config::write_log(&format!("[server] Login successful, starting session"));
 
+    let _session_report = if is_terminal || is_port_forward {
+        None
+    } else {
+        let remote_ip = stream.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+        let session_type = if is_file_transfer { "file_transfer" } else { "screen" };
+        Some(crate::dashboard::SessionGuard::start(session_type, &remote_ip, &lr.my_name))
+    };
+
     {
         let cfg2 = crate::config::Config2::load();
         let perms = [
@@ -1019,6 +1039,7 @@ fn run_video_input_loop(
     let cfg2 = crate::config::Config2::load();
     let mut keyboard_enabled = cfg2.get_option("enable-keyboard") != "N";
     let mut clipboard_enabled = cfg2.get_option("enable-clipboard") != "N";
+    let mut audio_enabled = true;
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -1212,43 +1233,36 @@ fn run_video_input_loop(
                 let path = cm::cm_perm_path(sid);
                 if let Ok(text) = std::fs::read_to_string(&path) {
                     let _ = std::fs::remove_file(&path);
-                    if !text.is_empty() {
-
-                        let parts: Vec<&str> = text.splitn(2, '|').collect();
-                        if parts.len() == 2 {
-                            let perm_name = parts[0];
-                            let enabled = parts[1] == "1";
-                            crate::config::write_log(&format!("[server] Permission change: {}={}", perm_name, enabled));
-
-                            let perm_enum = match perm_name {
-                                "keyboard" => Some(message_proto::permission_info::Permission::Keyboard),
-                                "clipboard" => Some(message_proto::permission_info::Permission::Clipboard),
-                                "audio" => Some(message_proto::permission_info::Permission::Audio),
-                                _ => None,
-                            };
-                            if let Some(perm) = perm_enum {
-                                let mut perm_info = message_proto::PermissionInfo::new();
-                                perm_info.permission = protobuf::EnumOrUnknown::new(perm);
-                                perm_info.enabled = enabled;
-                                let mut misc = message_proto::Misc::new();
-                                misc.set_permission_info(perm_info);
-                                let mut msg = message_proto::Message::new();
-                                msg.set_misc(misc);
-                                let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
-                            }
-
-                            match perm_name {
-                                "keyboard" => { keyboard_enabled = enabled; }
-                                "clipboard" => {
-                                    clipboard_enabled = enabled;
-                                    if !enabled {
-
-                                        last_clipboard_text.clear();
-                                    }
-                                }
-                                _ => {}
-                            }
+                    for entry in text.split(';') {
+                        let (perm_name, enabled) = match entry.trim().split_once('|') {
+                            Some((name, value)) => (name, value == "1"),
+                            None => continue,
+                        };
+                        let (perm, current, setting) = match perm_name {
+                            "keyboard" => (message_proto::permission_info::Permission::Keyboard, &mut keyboard_enabled, "enable-keyboard"),
+                            "clipboard" => (message_proto::permission_info::Permission::Clipboard, &mut clipboard_enabled, "enable-clipboard"),
+                            "audio" => (message_proto::permission_info::Permission::Audio, &mut audio_enabled, ""),
+                            _ => continue,
+                        };
+                        if enabled && !setting.is_empty() && crate::config::Config2::load().get_option(setting) == "N" {
+                            continue;
                         }
+                        if *current == enabled {
+                            continue;
+                        }
+                        *current = enabled;
+                        crate::config::write_log(&format!("[server] Permission change: {}={}", perm_name, enabled));
+                        if perm_name == "clipboard" && !enabled {
+                            last_clipboard_text.clear();
+                        }
+                        let mut perm_info = message_proto::PermissionInfo::new();
+                        perm_info.permission = protobuf::EnumOrUnknown::new(perm);
+                        perm_info.enabled = enabled;
+                        let mut misc = message_proto::Misc::new();
+                        misc.set_permission_info(perm_info);
+                        let mut msg = message_proto::Message::new();
+                        msg.set_misc(misc);
+                        let _ = stream.send_msg(&msg.write_to_bytes().unwrap_or_default());
                     }
                 }
             }
@@ -1288,10 +1302,7 @@ fn run_video_input_loop(
                 let reply = if !accepted {
                     link_dashboard_response_msg(false, "declined")
                 } else {
-                    let mut cfg2 = crate::config::Config2::load();
-                    cfg2.set_option("invite_code", &code);
-                    cfg2.save();
-                    match crate::dashboard::link_device() {
+                    match crate::dashboard::link_with_code(&code) {
                         Ok(()) => {
                             let mut cfg2 = crate::config::Config2::load();
                             cfg2.set_option("last_enrolled_invite_code", &code);
@@ -1300,9 +1311,6 @@ fn run_video_input_loop(
                         }
                         Err(e) => {
                             crate::config::write_log(&format!("[server] LinkDashboard link_device failed: {}", e));
-                            let mut cfg2 = crate::config::Config2::load();
-                            cfg2.set_option("invite_code", "");
-                            cfg2.save();
                             link_dashboard_response_msg(false, "link_failed")
                         }
                     }

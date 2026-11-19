@@ -6,12 +6,47 @@ use std::time::Duration;
 use rustls::{ClientConnection, StreamOwned};
 use rustls::pki_types::ServerName;
 
+const WSS_FRAME_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub struct WsClient {
     stream: TcpStream,
+    pending: Vec<u8>,
 }
 
 pub struct WssClient {
     stream: StreamOwned<ClientConnection, TcpStream>,
+    pending: Vec<u8>,
+}
+
+fn read_upgrade_response<S: Read>(stream: &mut S) -> std::io::Result<Vec<u8>> {
+    let mut resp_buf = [0u8; 4096];
+    let mut total = 0;
+    loop {
+        let n = stream.read(&mut resp_buf[total..])?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "Connection closed during handshake",
+            ));
+        }
+        total += n;
+        if let Some(end) = resp_buf[..total].windows(4).position(|w| w == b"\r\n\r\n") {
+            if !resp_buf.starts_with(b"HTTP/1.1 101") {
+                let head = String::from_utf8_lossy(&resp_buf[..end]);
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("WebSocket upgrade failed: {}", head.lines().next().unwrap_or("")),
+                ));
+            }
+            return Ok(resp_buf[end + 4..total].to_vec());
+        }
+        if total >= resp_buf.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "HTTP response too large",
+            ));
+        }
+    }
 }
 
 impl WssClient {
@@ -40,38 +75,18 @@ impl WssClient {
         stream.write_all(request.as_bytes())?;
         stream.flush()?;
 
-        let mut resp_buf = [0u8; 1024];
-        let mut total = 0;
-        loop {
-            let n = stream.read(&mut resp_buf[total..])?;
-            if n == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionReset,
-                    "Connection closed during handshake",
-                ));
-            }
-            total += n;
-            if total >= 4 {
-                let s = std::str::from_utf8(&resp_buf[..total]).unwrap_or("");
-                if s.contains("\r\n\r\n") {
-                    if !s.starts_with("HTTP/1.1 101") {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!("WebSocket upgrade failed: {}", s.lines().next().unwrap_or("")),
-                        ));
-                    }
-                    break;
-                }
-            }
-            if total >= resp_buf.len() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "HTTP response too large",
-                ));
-            }
-        }
+        let pending = read_upgrade_response(&mut stream)?;
+        Ok(Self { stream, pending })
+    }
 
-        Ok(Self { stream })
+    fn read_exact_buffered(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
+        let from_pending = buf.len().min(self.pending.len());
+        buf[..from_pending].copy_from_slice(&self.pending[..from_pending]);
+        self.pending.drain(..from_pending);
+        if from_pending < buf.len() {
+            self.stream.read_exact(&mut buf[from_pending..])?;
+        }
+        Ok(())
     }
 
     pub fn send_text(&mut self, msg: &str) -> std::io::Result<()> {
@@ -143,18 +158,34 @@ impl WssClient {
     }
 
     fn read_frame(&mut self) -> std::io::Result<(u8, Vec<u8>)> {
-        let mut header = [0u8; 2];
-        self.stream.read_exact(&mut header)?;
-        let opcode = header[0] & 0x0F;
-        let masked = (header[1] & 0x80) != 0;
-        let mut len = (header[1] & 0x7F) as u64;
+        let mut first = [0u8; 1];
+        self.read_exact_buffered(&mut first)?;
+        let idle_timeout = self.stream.sock.read_timeout()?;
+        self.stream.sock.set_read_timeout(Some(WSS_FRAME_READ_TIMEOUT))?;
+        let frame = self.read_frame_rest(first[0]);
+        self.stream.sock.set_read_timeout(idle_timeout)?;
+        frame.map_err(|e| match e.kind() {
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "WebSocket frame stalled",
+            ),
+            _ => e,
+        })
+    }
+
+    fn read_frame_rest(&mut self, first: u8) -> std::io::Result<(u8, Vec<u8>)> {
+        let mut second = [0u8; 1];
+        self.read_exact_buffered(&mut second)?;
+        let opcode = first & 0x0F;
+        let masked = (second[0] & 0x80) != 0;
+        let mut len = (second[0] & 0x7F) as u64;
         if len == 126 {
             let mut ext = [0u8; 2];
-            self.stream.read_exact(&mut ext)?;
+            self.read_exact_buffered(&mut ext)?;
             len = u16::from_be_bytes(ext) as u64;
         } else if len == 127 {
             let mut ext = [0u8; 8];
-            self.stream.read_exact(&mut ext)?;
+            self.read_exact_buffered(&mut ext)?;
             len = u64::from_be_bytes(ext);
         }
         if len > 16 * 1024 * 1024 {
@@ -165,13 +196,13 @@ impl WssClient {
         }
         let mask_key = if masked {
             let mut mk = [0u8; 4];
-            self.stream.read_exact(&mut mk)?;
+            self.read_exact_buffered(&mut mk)?;
             Some(mk)
         } else {
             None
         };
         let mut payload = vec![0u8; len as usize];
-        self.stream.read_exact(&mut payload)?;
+        self.read_exact_buffered(&mut payload)?;
         if let Some(mk) = mask_key {
             for (i, b) in payload.iter_mut().enumerate() {
                 *b ^= mk[i % 4];
@@ -204,39 +235,18 @@ impl WsClient {
         stream.write_all(request.as_bytes())?;
         stream.flush()?;
 
-        let mut resp_buf = [0u8; 1024];
-        let mut total = 0;
-        loop {
-            let n = stream.read(&mut resp_buf[total..])?;
-            if n == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionReset,
-                    "Connection closed during handshake",
-                ));
-            }
-            total += n;
+        let pending = read_upgrade_response(&mut stream)?;
+        Ok(Self { stream, pending })
+    }
 
-            if total >= 4 {
-                let s = std::str::from_utf8(&resp_buf[..total]).unwrap_or("");
-                if s.contains("\r\n\r\n") {
-                    if !s.starts_with("HTTP/1.1 101") {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!("WebSocket upgrade failed: {}", s.lines().next().unwrap_or("")),
-                        ));
-                    }
-                    break;
-                }
-            }
-            if total >= resp_buf.len() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "HTTP response too large",
-                ));
-            }
+    fn read_exact_buffered(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
+        let from_pending = buf.len().min(self.pending.len());
+        buf[..from_pending].copy_from_slice(&self.pending[..from_pending]);
+        self.pending.drain(..from_pending);
+        if from_pending < buf.len() {
+            self.stream.read_exact(&mut buf[from_pending..])?;
         }
-
-        Ok(Self { stream })
+        Ok(())
     }
 
     pub fn send_text(&mut self, msg: &str) -> std::io::Result<()> {
@@ -320,47 +330,56 @@ impl WsClient {
     }
 
     fn read_frame(&mut self) -> std::io::Result<(u8, Vec<u8>)> {
-        let mut header = [0u8; 2];
-        self.stream.read_exact(&mut header)?;
+        let mut first = [0u8; 1];
+        self.read_exact_buffered(&mut first)?;
+        let idle_timeout = self.stream.read_timeout()?;
+        self.stream.set_read_timeout(Some(WSS_FRAME_READ_TIMEOUT))?;
+        let frame = self.read_frame_rest(first[0]);
+        self.stream.set_read_timeout(idle_timeout)?;
+        frame.map_err(|e| match e.kind() {
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "WebSocket frame stalled",
+            ),
+            _ => e,
+        })
+    }
 
-        let opcode = header[0] & 0x0F;
-        let masked = (header[1] & 0x80) != 0;
-        let mut len = (header[1] & 0x7F) as u64;
-
+    fn read_frame_rest(&mut self, first: u8) -> std::io::Result<(u8, Vec<u8>)> {
+        let mut second = [0u8; 1];
+        self.read_exact_buffered(&mut second)?;
+        let opcode = first & 0x0F;
+        let masked = (second[0] & 0x80) != 0;
+        let mut len = (second[0] & 0x7F) as u64;
         if len == 126 {
             let mut ext = [0u8; 2];
-            self.stream.read_exact(&mut ext)?;
+            self.read_exact_buffered(&mut ext)?;
             len = u16::from_be_bytes(ext) as u64;
         } else if len == 127 {
             let mut ext = [0u8; 8];
-            self.stream.read_exact(&mut ext)?;
+            self.read_exact_buffered(&mut ext)?;
             len = u64::from_be_bytes(ext);
         }
-
         if len > 16 * 1024 * 1024 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "WebSocket frame too large",
             ));
         }
-
         let mask_key = if masked {
             let mut mk = [0u8; 4];
-            self.stream.read_exact(&mut mk)?;
+            self.read_exact_buffered(&mut mk)?;
             Some(mk)
         } else {
             None
         };
-
         let mut payload = vec![0u8; len as usize];
-        self.stream.read_exact(&mut payload)?;
-
+        self.read_exact_buffered(&mut payload)?;
         if let Some(mk) = mask_key {
             for (i, b) in payload.iter_mut().enumerate() {
                 *b ^= mk[i % 4];
             }
         }
-
         Ok((opcode, payload))
     }
 }
@@ -415,4 +434,39 @@ fn base64_encode(data: &[u8]) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    fn serve_once(reply: Vec<u8>) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = sock.read(&mut request);
+            sock.write_all(&reply).unwrap();
+            std::thread::sleep(Duration::from_millis(500));
+        });
+        port
+    }
+
+    #[test]
+    fn ws_client_keeps_a_frame_that_arrives_with_the_upgrade_reply() {
+        let mut reply = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_vec();
+        reply.extend_from_slice(&[0x81, 0x05]);
+        reply.extend_from_slice(b"hello");
+        let port = serve_once(reply);
+        let mut ws = WsClient::connect("127.0.0.1", port, "/").unwrap();
+        assert_eq!(ws.recv_text().unwrap(), "hello");
+    }
+
+    #[test]
+    fn ws_client_refuses_a_reply_that_is_not_an_upgrade() {
+        let port = serve_once(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n".to_vec());
+        assert!(WsClient::connect("127.0.0.1", port, "/").is_err());
+    }
 }
